@@ -1,12 +1,22 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer, collection, getDocs, setDoc, updateDoc, deleteDoc, query, where, onSnapshot } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+import rawAppletConfig from '../../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+const activeConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || rawAppletConfig.apiKey || '',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || rawAppletConfig.authDomain || '',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || rawAppletConfig.projectId || '',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || rawAppletConfig.storageBucket || '',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || rawAppletConfig.messagingSenderId || '',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || rawAppletConfig.appId || '',
+  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_DATABASE_ID || rawAppletConfig.firestoreDatabaseId || 'ai-studio-8e50d3b3-47bc-4226-b17c-67741752ed3c',
+};
 
-// CRITICAL: Must use firestoreDatabaseId from firebase-applet-config.json
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+const app = initializeApp(activeConfig);
+
+// CRITICAL: Must use firestoreDatabaseId
+export const db = getFirestore(app, activeConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
