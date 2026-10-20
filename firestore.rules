@@ -1,0 +1,85 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default-deny all by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // User profile and accounting company settings
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(userId);
+      allow update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+
+      // Companies subcollection (Multi-Empresa)
+      match /companies/{companyId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(companyId);
+        allow update: if isOwner(userId) && isValidId(companyId);
+        allow delete: if isOwner(userId) && isValidId(companyId);
+      }
+
+      // Bank and Ledger Transactions subcollection
+      match /transactions/{transactionId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(transactionId);
+        allow update: if isOwner(userId) && isValidId(transactionId);
+        allow delete: if isOwner(userId) && isValidId(transactionId);
+      }
+
+      // Reconciliation Sessions
+      match /reconciliations/{reconciliationId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(reconciliationId);
+        allow update: if isOwner(userId) && isValidId(reconciliationId);
+        allow delete: if isOwner(userId) && isValidId(reconciliationId);
+      }
+
+      // Cash Log (Efectivo Tracker)
+      match /cashLogs/{logId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(logId);
+        allow update: if isOwner(userId) && isValidId(logId);
+        allow delete: if isOwner(userId) && isValidId(logId);
+      }
+
+      // Cash Traces (Traza de Efectivo y Canales Digitales)
+      match /cashTraces/{traceId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(traceId);
+        allow update: if isOwner(userId) && isValidId(traceId);
+        allow delete: if isOwner(userId) && isValidId(traceId);
+      }
+
+      // Audit Vault Items
+      match /vault/{vaultId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(vaultId);
+        allow update: if isOwner(userId) && isValidId(vaultId);
+        allow delete: if isOwner(userId) && isValidId(vaultId);
+      }
+
+      // Reconciliation Snapshots / Puntos de Restauración
+      match /snapshots/{snapshotId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(snapshotId);
+        allow update: if isOwner(userId) && isValidId(snapshotId);
+        allow delete: if isOwner(userId) && isValidId(snapshotId);
+      }
+    }
+  }
+}

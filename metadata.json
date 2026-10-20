@@ -1,0 +1,6 @@
+{
+  "name": "NOMINUS - Conciliación Bancaria con IA para Venezuela",
+  "description": "Sistema inteligente de conciliación bancaria y blindaje fiscal RegTech para empresas y contadores en Venezuela (Ven-NIF, SENIAT, SUDEBAN, Tasa BCV y Trazabilidad de Efectivo).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

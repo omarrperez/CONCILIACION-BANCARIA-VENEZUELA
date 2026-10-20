@@ -1,0 +1,203 @@
+{
+  "entities": {
+    "CompanyProfile": {
+      "title": "CompanyProfile",
+      "description": "Perfil de empresa registrada con sus datos fiscales y lista de cuentas bancarias en Venezuela",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "uid": { "type": "string", "maxLength": 128 },
+        "companyName": { "type": "string", "maxLength": 200 },
+        "companyRif": { "type": "string", "maxLength": 20 },
+        "address": { "type": "string", "maxLength": 300 },
+        "isSpecialTaxpayer": { "type": "boolean" },
+        "vatRetentionRate": { "type": "number" },
+        "defaultCurrency": { "type": "string", "enum": ["VES", "USD"] },
+        "bcvRate": { "type": "number" },
+        "accountingSystemTarget": { "type": "string", "maxLength": 50 },
+        "bankAccounts": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "companyName", "companyRif"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Información del usuario y empresa activa seleccionada",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "companyName": { "type": "string", "maxLength": 200 },
+        "companyRif": { "type": "string", "maxLength": 20 },
+        "activeCompanyId": { "type": "string", "maxLength": 128 },
+        "isSpecialTaxpayer": { "type": "boolean" },
+        "defaultCurrency": { "type": "string", "enum": ["VES", "USD"] },
+        "bcvRate": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "email"]
+    },
+    "BankTransaction": {
+      "title": "BankTransaction",
+      "description": "Transacciones bancarias y asientos contables asociadas a una empresa y banco",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "companyId": { "type": "string", "maxLength": 128 },
+        "bankAccountId": { "type": "string", "maxLength": 128 },
+        "source": { "type": "string", "enum": ["BANK", "LEDGER"] },
+        "bankCode": { "type": "string", "maxLength": 8 },
+        "bankName": { "type": "string", "maxLength": 100 },
+        "referenceNum": { "type": "string", "maxLength": 64 },
+        "txDate": { "type": "string", "maxLength": 30 },
+        "txType": { "type": "string", "enum": ["CREDIT", "DEBIT"] },
+        "amountNominal": { "type": "number" },
+        "currency": { "type": "string", "enum": ["VES", "USD"] },
+        "bcvRate": { "type": "number" },
+        "amountVes": { "type": "number" },
+        "rawDescription": { "type": "string", "maxLength": 500 },
+        "counterpartyRif": { "type": "string", "maxLength": 20 },
+        "accountCode": { "type": "string", "maxLength": 30 },
+        "accountName": { "type": "string", "maxLength": 150 },
+        "matchingStatus": { "type": "string", "enum": ["MATCHED_EXACT", "MATCHED_FUZZY", "DISCREPANCY", "UNMATCHED"] },
+        "matchedWithId": { "type": "string", "maxLength": 128 },
+        "moduleTag": { "type": "string", "maxLength": 100 },
+        "retentionVatRate": { "type": "number" },
+        "retentionVatAmount": { "type": "number" },
+        "retentionIslrAmount": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "source", "referenceNum", "txDate", "txType", "amountNominal", "currency"]
+    },
+    "Reconciliation": {
+      "title": "Reconciliation",
+      "description": "Sesión de conciliación y reporte de Prueba de Efectivo por empresa y banco",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "companyId": { "type": "string", "maxLength": 128 },
+        "period": { "type": "string", "maxLength": 30 },
+        "bankCode": { "type": "string", "maxLength": 8 },
+        "currency": { "type": "string", "enum": ["VES", "USD"] },
+        "balanceBank": { "type": "number" },
+        "balanceLedger": { "type": "number" },
+        "depositsInTransit": { "type": "number" },
+        "outstandingChecks": { "type": "number" },
+        "unrecordedCredits": { "type": "number" },
+        "unrecordedDebits": { "type": "number" },
+        "reconciledBalance": { "type": "number" },
+        "difference": { "type": "number" },
+        "status": { "type": "string", "enum": ["IN_PROGRESS", "BALANCED", "FLAGGED"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "period", "bankCode", "currency", "balanceBank", "balanceLedger"]
+    },
+    "CashLog": {
+      "title": "CashLog",
+      "description": "Trazabilidad de caja física, arqueo de denominaciones y despacho bancario",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "companyId": { "type": "string", "maxLength": 128 },
+        "date": { "type": "string", "maxLength": 30 },
+        "currency": { "type": "string", "enum": ["VES", "USD"] },
+        "cashier": { "type": "string", "maxLength": 100 },
+        "initialBalance": { "type": "number" },
+        "totalSales": { "type": "number" },
+        "pettyCashExpenses": { "type": "number" },
+        "physicalCount": { "type": "number" },
+        "difference": { "type": "number" },
+        "billsDetails": { "type": "string", "maxLength": 2000 },
+        "usdSerialNumbers": { "type": "string", "maxLength": 2000 },
+        "bankDepositRef": { "type": "string", "maxLength": 64 },
+        "depositStatus": { "type": "string", "enum": ["IN_VAULT", "DISPATCHED", "CONFIRMED_BANK"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "date", "currency", "cashier", "physicalCount"]
+    },
+    "AuditVaultItem": {
+      "title": "AuditVaultItem",
+      "description": "Documentos auditables respaldados con huella SHA-256",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "companyId": { "type": "string", "maxLength": 128 },
+        "documentType": { "type": "string", "maxLength": 50 },
+        "title": { "type": "string", "maxLength": 200 },
+        "sha256Hash": { "type": "string", "maxLength": 64 },
+        "relatedReference": { "type": "string", "maxLength": 64 },
+        "counterpartyRif": { "type": "string", "maxLength": 20 },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "maxLength": 30 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "documentType", "title", "sha256Hash"]
+    },
+    "ReconciliationSnapshot": {
+      "title": "ReconciliationSnapshot",
+      "description": "Punto de restauración completo de la conciliación bancaria",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "companyId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string" },
+        "currency": { "type": "string", "enum": ["VES", "USD"] },
+        "bankCode": { "type": "string", "maxLength": 10 },
+        "initialBalanceBank": { "type": "number" },
+        "initialBalanceLedger": { "type": "number" },
+        "transactionsCount": { "type": "number" },
+        "bankCount": { "type": "number" },
+        "ledgerCount": { "type": "number" },
+        "matchedCount": { "type": "number" },
+        "discrepancyCount": { "type": "number" },
+        "unmatchedCount": { "type": "number" },
+        "isBalanced": { "type": "boolean" },
+        "difference": { "type": "number" },
+        "transactions": { "type": "array" }
+      },
+      "required": ["id", "userId", "name", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Perfiles y configuración de usuario activo"
+    },
+    "/users/{userId}/companies/{companyId}": {
+      "schema": "CompanyProfile",
+      "description": "Empresas registradas y sus cuentas bancarias"
+    },
+    "/users/{userId}/transactions/{transactionId}": {
+      "schema": "BankTransaction",
+      "description": "Partidas bancarias y contables conciliadas y pendientes"
+    },
+    "/users/{userId}/reconciliations/{reconciliationId}": {
+      "schema": "Reconciliation",
+      "description": "Cierres de conciliación bancaria y Prueba de Efectivo"
+    },
+    "/users/{userId}/cashLogs/{logId}": {
+      "schema": "CashLog",
+      "description": "Registros de trazabilidad y arqueos de efectivo físico"
+    },
+    "/users/{userId}/vault/{vaultId}": {
+      "schema": "AuditVaultItem",
+      "description": "Bóveda criptográfica de comprobantes, contratos y facturas"
+    },
+    "/users/{userId}/snapshots/{snapshotId}": {
+      "schema": "ReconciliationSnapshot",
+      "description": "Puntos de restauración de la conciliación bancaria"
+    }
+  }
+}
