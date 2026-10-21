@@ -33,7 +33,7 @@ import {
   ProofOfCash
 } from '../types/accounting';
 import { VENEZUELAN_BANKS } from '../data/venNifAccounts';
-import { calculateProofOfCash, runAutomatedReconciliation } from '../services/matchingEngine';
+import { calculateProofOfCash, runAutomatedReconciliation, runAutomatedReconciliationAsync } from '../services/matchingEngine';
 import { SuggestedAdjustmentsAssistant } from './SuggestedAdjustmentsAssistant';
 import { generateSuggestedAdjustments } from '../services/adjustmentEngine';
 
@@ -158,7 +158,7 @@ export const ReconciliationResultsModule: React.FC<ReconciliationResultsModulePr
   }, [bankTransactions, ledgerTransactions, proof.isBalanced, unrecordedBankDebits, unrecordedBankCredits]);
 
   // Auto-Fix: Incorporate unrecorded bank debits (comisiones, IGTF) directly into Ledger with 1 Click
-  const handleAutoIncorporateBankCharges = () => {
+  const handleAutoIncorporateBankCharges = async () => {
     setIsAutoFixing(true);
 
     const pendingBankItems = [...unrecordedBankDebits, ...unrecordedBankCredits];
@@ -208,13 +208,20 @@ export const ReconciliationResultsModule: React.FC<ReconciliationResultsModulePr
       };
     });
 
-    const combined = [...transactions, ...newLedgerItems];
-    const { updatedTransactions, exactMatchesCount, fuzzyMatchesCount } = runAutomatedReconciliation(combined);
+    try {
+      const combined = [...transactions, ...newLedgerItems];
+      const { updatedTransactions, exactMatchesCount, fuzzyMatchesCount } = await runAutomatedReconciliationAsync(combined);
 
-    onUpdateTransactions(updatedTransactions);
-    setIsAutoFixing(false);
-    setActionFeedback(`¡Excelente! Se crearon ${newLedgerItems.length} asientos contables de ajuste en tu Libro Mayor y se conciliaron ${exactMatchesCount + fuzzyMatchesCount} partidas automáticamente.`);
-    setTimeout(() => setActionFeedback(null), 8000);
+      onUpdateTransactions(updatedTransactions);
+      setActionFeedback(`¡Excelente! Se crearon ${newLedgerItems.length} asientos contables de ajuste en tu Libro Mayor y se conciliaron ${exactMatchesCount + fuzzyMatchesCount} partidas automáticamente.`);
+      setTimeout(() => setActionFeedback(null), 8000);
+    } catch (err) {
+      console.error('Error al incorporar cargos bancarios:', err);
+      setActionFeedback('Ocurrió un error al procesar los ajustes contables.');
+      setTimeout(() => setActionFeedback(null), 6000);
+    } finally {
+      setIsAutoFixing(false);
+    }
   };
 
   const currentBankObj = VENEZUELAN_BANKS.find(b => b.code === selectedBank) || VENEZUELAN_BANKS[0];
@@ -1157,6 +1164,85 @@ export const ReconciliationResultsModule: React.FC<ReconciliationResultsModulePr
           </div>
         </div>
       )}
+
+      {/* ======================================================== */}
+      {/* BANNER INFERIOR DE SIGUIENTE PASO RECOMENDADO            */}
+      {/* ======================================================== */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-5 text-white shadow-lg border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4 mt-8">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center flex-shrink-0 text-emerald-400">
+            <Sparkles className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/50">
+              Siguiente Paso Recomendado
+            </span>
+            <p className="text-sm font-bold text-white mt-1">
+              {verdict === 'BALANCED'
+                ? '¡Tu conciliación está 100% cuadrada y lista para auditoría!'
+                : verdict === 'PENDING_ADJUSTMENTS'
+                ? 'Ajusta los cargos del banco pendientes para lograr el cuadre perfecto'
+                : verdict === 'UNEXPLAINED_DIFFERENCE'
+                ? 'Revisa o corrige transacciones descuadradas en la Mesa de Conciliación'
+                : 'Carga el extracto bancario o libro contable para poder conciliar'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {verdict === 'BALANCED' && (
+            <>
+              <button
+                onClick={onOpenProofModal}
+                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-md transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <FileText className="w-4 h-4" />
+                <span>Ver Cédula 4 Columnas</span>
+              </button>
+              {onOpenExportModal && (
+                <button
+                  onClick={onOpenExportModal}
+                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/20 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  <span>Exportar Informe SENIAT</span>
+                </button>
+              )}
+            </>
+          )}
+
+          {verdict === 'PENDING_ADJUSTMENTS' && (
+            <button
+              onClick={handleAutoIncorporateBankCharges}
+              disabled={isAutoFixing}
+              className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs shadow-md transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <Zap className="w-4 h-4 text-slate-950" />
+              <span>{isAutoFixing ? 'Procesando...' : '⚡ Contabilizar Cargos en 1 Clic'}</span>
+            </button>
+          )}
+
+          {verdict === 'UNEXPLAINED_DIFFERENCE' && (
+            <button
+              onClick={onNavigateToWorkspace}
+              className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <span>Ir a Mesa de Conciliación</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          )}
+
+          {(verdict === 'NO_DATA' || verdict === 'MISSING_ONE_SIDE') && (
+            <button
+              onClick={() => onNavigateToAssistant(bankTransactions.length > 0 ? 'LEDGER' : 'BANK')}
+              className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-md transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <Upload className="w-4 h-4" />
+              <span>Cargar Archivo Faltante</span>
+            </button>
+          )}
+        </div>
+      </div>
 
     </div>
   );

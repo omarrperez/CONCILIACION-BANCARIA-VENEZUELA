@@ -17,7 +17,8 @@ import {
   ShieldCheck,
   Check,
   Loader2,
-  FileJson
+  FileJson,
+  Lock
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { BankTransaction, CurrencyType, ReconciliationSnapshot } from '../types/accounting';
@@ -41,6 +42,7 @@ interface RestorePointModalProps {
   initialBalanceBank: number;
   initialBalanceLedger: number;
   onRestoreComplete: (restoredTransactions: BankTransaction[], initialBank: number, initialLedger: number, currency: CurrencyType) => void;
+  onOpenEncryptedBackup?: () => void;
 }
 
 export const RestorePointModal: React.FC<RestorePointModalProps> = ({
@@ -52,7 +54,8 @@ export const RestorePointModal: React.FC<RestorePointModalProps> = ({
   selectedBank = 'ALL',
   initialBalanceBank,
   initialBalanceLedger,
-  onRestoreComplete
+  onRestoreComplete,
+  onOpenEncryptedBackup
 }) => {
   const [snapshots, setSnapshots] = useState<ReconciliationSnapshot[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -319,6 +322,21 @@ export const RestorePointModal: React.FC<RestorePointModalProps> = ({
                 <Upload className="w-3.5 h-3.5 text-slate-500" />
                 <span className="hidden sm:inline">Importar JSON</span>
               </button>
+
+              {onOpenEncryptedBackup && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenEncryptedBackup();
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-xs cursor-pointer transition-all"
+                  title="Exportar base de datos completa a un archivo JSON cifrado localmente con AES-256"
+                >
+                  <Lock className="w-3.5 h-3.5 text-indigo-300" />
+                  <span>Bóveda Cifrada (AES-256)</span>
+                </button>
+              )}
               <input
                 ref={fileInputRef}
                 type="file"

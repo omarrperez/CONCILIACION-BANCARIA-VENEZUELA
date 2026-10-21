@@ -5,7 +5,7 @@
 
 import { BankTransaction, DigitalSupportAttachment } from '../types/accounting';
 import { getBeneficiaryRepository, learnBeneficiaryRepository } from './beneficiaryMemoryService';
-import { extractMetadataFromDescription } from './matchingEngine';
+import { extractMetadataFromDescription, calculateDescriptionSimilarity } from './matchingEngine';
 
 export interface AutoReconcileReport {
   totalProcessed: number;
@@ -230,6 +230,41 @@ export function runVenezuelanAutoMatcher(params: {
         tx.autoReconciledBy = 'BENEFICIARY_MEMORY';
         tx.notes = `Asignado por memoria histórica a ${memoryMatch.beneficiaryName || memoryMatch.moduleTag}.`;
         matchedBeneficiaryMemoryCount++;
+      }
+    }
+  }
+
+  // REGLA 5: Cruce Banco vs Libro por Monto y Similitud de Concepto
+  for (let i = 0; i < updatedTransactions.length; i++) {
+    const bnk = updatedTransactions[i];
+    if (bnk.source !== 'BANK' || bnk.matchingStatus === 'MATCHED_EXACT') continue;
+
+    for (let j = 0; j < updatedTransactions.length; j++) {
+      if (i === j) continue;
+      const led = updatedTransactions[j];
+      if (led.source !== 'LEDGER' || led.matchingStatus === 'MATCHED_EXACT') continue;
+      if (bnk.bankCode && led.bankCode && bnk.bankCode !== led.bankCode) continue;
+      if (bnk.currency !== led.currency) continue;
+
+      if (Math.abs(bnk.amountNominal - led.amountNominal) < 0.05) {
+        const days = getDaysDiff(bnk.txDate, led.txDate);
+        if (days <= 3) {
+          const { score, reason } = calculateDescriptionSimilarity(bnk.rawDescription, led.rawDescription);
+          if (score >= 0.70) {
+            bnk.matchingStatus = 'MATCHED_EXACT';
+            bnk.matchedWithId = led.id;
+            bnk.matchScore = Number(score.toFixed(2));
+            bnk.notes = `Conciliado por Monto y Concepto (${reason}).`;
+
+            led.matchingStatus = 'MATCHED_EXACT';
+            led.matchedWithId = bnk.id;
+            led.matchScore = Number(score.toFixed(2));
+            led.notes = `Conciliado por Monto y Concepto (${reason}).`;
+
+            matchedWithSupportCount++;
+            break;
+          }
+        }
       }
     }
   }

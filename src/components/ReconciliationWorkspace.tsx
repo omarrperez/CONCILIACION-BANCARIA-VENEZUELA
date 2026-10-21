@@ -22,15 +22,23 @@ import {
   FileSpreadsheet,
   Download,
   History,
-  ClipboardPaste
+  ClipboardPaste,
+  HeartPulse,
+  Lock,
+  Trash2,
+  Pencil,
+  Plus
 } from 'lucide-react';
 import { BankTransaction, CurrencyType, MatchingStatus, TransactionSource, UserCompanyProfile } from '../types/accounting';
 import { VENEZUELAN_BANKS } from '../data/venNifAccounts';
-import { runAutomatedReconciliation } from '../services/matchingEngine';
+import { runAutomatedReconciliation, runAutomatedReconciliationAsync, ReconciliationProgress } from '../services/matchingEngine';
 import { parseAndCategorizeLedgerText, AIParsedLedgerRow } from '../services/aiAccountant';
 import { SuggestedAdjustmentsAssistant } from './SuggestedAdjustmentsAssistant';
 import { generateSuggestedAdjustments } from '../services/adjustmentEngine';
 import { FileUploadModal } from './FileUploadModal';
+import { runDatabaseHealthCheck } from '../services/healthCheckService';
+import { ClearReconciliationModal, ClearReconciliationOption } from './ClearReconciliationModal';
+import { TransactionEditorModal } from './TransactionEditorModal';
 
 interface ReconciliationWorkspaceProps {
   transactions: BankTransaction[];
@@ -47,6 +55,14 @@ interface ReconciliationWorkspaceProps {
   onNavigateToResults?: () => void;
   onOpenExportModal?: () => void;
   onOpenRestoreModal?: () => void;
+  onOpenHealthCheckup?: () => void;
+  onOpenEncryptedBackup?: () => void;
+  onClearReconciliation?: (
+    option: ClearReconciliationOption,
+    scope: 'ALL_BANKS' | 'SELECTED_BANK_ONLY'
+  ) => Promise<void> | void;
+  onSaveTransaction?: (tx: BankTransaction) => Promise<void> | void;
+  onDeleteTransaction?: (txId: string) => Promise<void> | void;
 }
 
 export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = ({
@@ -63,14 +79,35 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   onAddParsedTransactions,
   onNavigateToResults,
   onOpenExportModal,
-  onOpenRestoreModal
+  onOpenRestoreModal,
+  onOpenHealthCheckup,
+  onOpenEncryptedBackup,
+  onClearReconciliation,
+  onSaveTransaction,
+  onDeleteTransaction
 }) => {
   const [selectedBank, setSelectedBank] = useState<string>('ALL'); // Default to ALL or auto-detected bank
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [toleranceDays, setToleranceDays] = useState<number>(3);
+
+  // Auditoría automática de salud de datos
+  const healthIssuesCount = useMemo(() => {
+    return runDatabaseHealthCheck(transactions).issues.length;
+  }, [transactions]);
   const [isReconciling, setIsReconciling] = useState(false);
+  const [reconcileProgress, setReconcileProgress] = useState<ReconciliationProgress | null>(null);
   const [reconcileResultToast, setReconcileResultToast] = useState<string | null>(null);
+
+  // Modal para Limpiar Conciliación
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
+
+  // Modal para Introducir / Corregir Transacciones
+  const [isTxEditorOpen, setIsTxEditorOpen] = useState(false);
+  const [txEditorMode, setTxEditorMode] = useState<'CREATE' | 'EDIT'>('CREATE');
+  const [editingTx, setEditingTx] = useState<BankTransaction | null>(null);
+  const [txEditorDefaultSource, setTxEditorDefaultSource] = useState<TransactionSource>('BANK');
 
   // Assistant de Ajustes Sugeridos
   const [isAdjustmentsAssistantOpen, setIsAdjustmentsAssistantOpen] = useState(false);
@@ -93,13 +130,125 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   const [previewLedgerRows, setPreviewLedgerRows] = useState<AIParsedLedgerRow[] | null>(null);
   const [ledgerStats, setLedgerStats] = useState<{ totalDebe: number; totalHaber: number } | null>(null);
 
+  // Conteo de operaciones que no cuadran (discrepancias + pendientes)
+  const unreconciledCount = useMemo(() => {
+    return transactions.filter(t => {
+      if (t.currency !== currency) return false;
+      if (selectedBank !== 'ALL' && t.bankCode !== selectedBank) return false;
+      return t.matchingStatus === 'UNMATCHED' || t.matchingStatus === 'DISCREPANCY';
+    }).length;
+  }, [transactions, currency, selectedBank]);
+
+  const discrepancyCount = useMemo(() => {
+    return transactions.filter(t => {
+      if (t.currency !== currency) return false;
+      if (selectedBank !== 'ALL' && t.bankCode !== selectedBank) return false;
+      return t.matchingStatus === 'DISCREPANCY';
+    }).length;
+  }, [transactions, currency, selectedBank]);
+
+  // Manejador para abrir modal de introducción de nueva transacción
+  const handleOpenCreateTransaction = (src: TransactionSource = 'BANK') => {
+    setTxEditorMode('CREATE');
+    setEditingTx(null);
+    setTxEditorDefaultSource(src);
+    setIsTxEditorOpen(true);
+  };
+
+  // Manejador para abrir modal de corrección de transacción existente
+  const handleOpenEditTransaction = (tx: BankTransaction) => {
+    setTxEditorMode('EDIT');
+    setEditingTx(tx);
+    setTxEditorDefaultSource(tx.source);
+    setIsTxEditorOpen(true);
+  };
+
+  // Guardar creación o corrección de transacción
+  const handleSaveTransactionInternal = async (savedTx: BankTransaction) => {
+    if (onSaveTransaction) {
+      await onSaveTransaction(savedTx);
+    } else {
+      const idx = transactions.findIndex(t => t.id === savedTx.id);
+      if (idx >= 0) {
+        const copy = [...transactions];
+        copy[idx] = savedTx;
+        onUpdateTransactions(copy);
+      } else {
+        onUpdateTransactions([savedTx, ...transactions]);
+      }
+    }
+    setReconcileResultToast(
+      `Operación ref. ${savedTx.referenceNum} (${savedTx.source === 'BANK' ? 'Banco' : 'Libro'}) guardada con éxito.`
+    );
+    setTimeout(() => setReconcileResultToast(null), 5000);
+  };
+
+  // Eliminar transacción
+  const handleDeleteTransactionInternal = async (txId: string) => {
+    if (onDeleteTransaction) {
+      await onDeleteTransaction(txId);
+    } else {
+      const filtered = transactions.filter(t => t.id !== txId);
+      onUpdateTransactions(filtered);
+    }
+    setReconcileResultToast('Movimiento eliminado correctamente.');
+    setTimeout(() => setReconcileResultToast(null), 4000);
+  };
+
+  // Ejecutar limpieza de conciliación
+  const handleExecuteClear = async (
+    option: ClearReconciliationOption,
+    scope: 'ALL_BANKS' | 'SELECTED_BANK_ONLY'
+  ) => {
+    if (onClearReconciliation) {
+      await onClearReconciliation(option, scope);
+    } else {
+      const isTarget = (t: BankTransaction) => {
+        if (scope === 'SELECTED_BANK_ONLY' && selectedBank !== 'ALL') {
+          return t.bankCode === selectedBank;
+        }
+        return true;
+      };
+
+      if (option === 'ALL') {
+        onUpdateTransactions(transactions.filter(t => !isTarget(t)));
+        if (onUpdateInitialBalances) onUpdateInitialBalances(0, 0);
+      } else if (option === 'BANK') {
+        onUpdateTransactions(transactions.filter(t => !(isTarget(t) && t.source === 'BANK')));
+        if (onUpdateInitialBalances) onUpdateInitialBalances(0, initialBalanceLedger || 0);
+      } else if (option === 'LEDGER') {
+        onUpdateTransactions(transactions.filter(t => !(isTarget(t) && t.source === 'LEDGER')));
+        if (onUpdateInitialBalances) onUpdateInitialBalances(initialBalanceBank || 0, 0);
+      } else if (option === 'RESET_STATUS') {
+        const reseted = transactions.map(t => {
+          if (isTarget(t)) {
+            return {
+              ...t,
+              matchingStatus: 'UNMATCHED' as MatchingStatus,
+              matchedWithId: undefined,
+              matchScore: 0,
+              discrepancyAmount: undefined
+            };
+          }
+          return t;
+        });
+        onUpdateTransactions(reseted);
+      }
+    }
+
+    setReconcileResultToast('¡La conciliación fue limpiada exitosamente! El sistema está listo para empezar de nuevo.');
+    setTimeout(() => setReconcileResultToast(null), 6000);
+  };
+
   // Detect pending adjustments count for selected bank
-  const pendingAdjustments = generateSuggestedAdjustments(
-    transactions,
-    selectedBank === 'ALL' ? undefined : selectedBank,
-    currency,
-    bcvRate
-  );
+  const pendingAdjustments = useMemo(() => {
+    return generateSuggestedAdjustments(
+      transactions,
+      selectedBank === 'ALL' ? undefined : selectedBank,
+      currency,
+      bcvRate
+    );
+  }, [transactions, selectedBank, currency, bcvRate]);
 
   // Counts per bank to never lose visibility
   const bankCounts = useMemo(() => {
@@ -165,7 +314,11 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
     if (t.source !== 'BANK') return false;
     if (t.currency !== currency) return false;
     if (selectedBank !== 'ALL' && t.bankCode !== selectedBank) return false;
-    if (statusFilter !== 'ALL' && t.matchingStatus !== statusFilter) return false;
+    if (statusFilter === 'NO_CUADRAN') {
+      if (t.matchingStatus !== 'UNMATCHED' && t.matchingStatus !== 'DISCREPANCY') return false;
+    } else if (statusFilter !== 'ALL' && t.matchingStatus !== statusFilter) {
+      return false;
+    }
     if (searchTerm) {
       const matchTerm = searchTerm.toLowerCase();
       return (
@@ -181,7 +334,11 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
     if (t.source !== 'LEDGER') return false;
     if (t.currency !== currency) return false;
     if (selectedBank !== 'ALL' && t.bankCode !== selectedBank) return false;
-    if (statusFilter !== 'ALL' && t.matchingStatus !== statusFilter) return false;
+    if (statusFilter === 'NO_CUADRAN') {
+      if (t.matchingStatus !== 'UNMATCHED' && t.matchingStatus !== 'DISCREPANCY') return false;
+    } else if (statusFilter !== 'ALL' && t.matchingStatus !== statusFilter) {
+      return false;
+    }
     if (searchTerm) {
       const matchTerm = searchTerm.toLowerCase();
       return (
@@ -193,18 +350,38 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
     return true;
   });
 
-  // Run 5-stage automated matching
-  const handleRunReconciliation = () => {
+  // Run 5-stage automated matching via Web Worker / non-blocking chunking
+  const handleRunReconciliation = async () => {
+    if (isReconciling) return;
     setIsReconciling(true);
-    setTimeout(() => {
-      const result = runAutomatedReconciliation(transactions, toleranceDays);
+    setReconcileProgress({
+      progress: 5,
+      stageName: 'Iniciando conciliación...',
+      exactMatchesCount: 0,
+      fuzzyMatchesCount: 0,
+      discrepanciesCount: 0
+    });
+
+    try {
+      const result = await runAutomatedReconciliationAsync(
+        transactions,
+        toleranceDays,
+        (p) => setReconcileProgress(p)
+      );
+
       onUpdateTransactions(result.updatedTransactions);
-      setIsReconciling(false);
       setReconcileResultToast(
-        `Algoritmo completado: ${result.exactMatchesCount} coincidencias exactas, ${result.fuzzyMatchesCount} por similitud difusa Jaro-Winkler, ${result.discrepanciesCount} variaciones detectadas.`
+        `¡Conciliación completada con éxito! ${result.exactMatchesCount} coincidencias exactas, ${result.fuzzyMatchesCount} por similitud difusa, ${result.discrepanciesCount} variaciones detectadas.`
       );
       setTimeout(() => setReconcileResultToast(null), 6000);
-    }, 600);
+    } catch (err) {
+      console.error('Error durante la conciliación automática:', err);
+      setReconcileResultToast('Ocurrió un error al ejecutar la conciliación. Tus datos se mantienen a salvo.');
+      setTimeout(() => setReconcileResultToast(null), 6000);
+    } finally {
+      setIsReconciling(false);
+      setReconcileProgress(null);
+    }
   };
 
   // Confirm fuzzy match manually
@@ -431,98 +608,168 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
             })}
           </div>
 
-          {/* Action button */}
-          <div className="flex items-center gap-2">
+          {/* Action buttons - Streamlined Hierarchy to eliminate visual clutter */}
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            
+            {/* Primary Action 1: Import Excel / PDF */}
             <button
               onClick={() => {
                 setUploadModalDefaultSource('BANK');
                 setUploadModalInitialMode('FILE');
                 setIsUploadModalOpen(true);
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
               title="Cargar Estado de Cuenta Bancario o Libro Mayor desde archivo Excel (.xlsx, .xls), CSV o PDF"
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Cargar Excel / PDF / CSV</span>
+              <span>+ Cargar Excel / PDF</span>
             </button>
 
-            <button
-              onClick={() => {
-                setUploadModalDefaultSource('BANK');
-                setUploadModalInitialMode('PASTE');
-                setIsUploadModalOpen(true);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs border border-indigo-200 shadow-2xs transition-all cursor-pointer"
-              title="Copiar texto de un PDF y pegarlo directamente sin necesidad de encabezados"
-            >
-              <ClipboardPaste className="w-3.5 h-3.5" />
-              <span>📋 Pegar Texto de PDF</span>
-            </button>
-
-            <div className="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-100 px-2.5 py-1.5 rounded-xl">
-              <span className="text-[11px] font-medium">Tolerancia:</span>
-              <select
-                value={toleranceDays}
-                onChange={(e) => setToleranceDays(Number(e.target.value))}
-                className="bg-transparent font-bold text-slate-900 focus:outline-none cursor-pointer"
-              >
-                <option value={1}>±1 día</option>
-                <option value={2}>±2 días</option>
-                <option value={3}>±3 días (Estándar)</option>
-                <option value={5}>±5 días</option>
-              </select>
-            </div>
-
-            <button
-              onClick={() => setIsAdjustmentsAssistantOpen(prev => !prev)}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-bold text-xs shadow-xs transition-all cursor-pointer ${
-                isAdjustmentsAssistantOpen
-                  ? 'bg-indigo-700 text-white ring-2 ring-indigo-400'
-                  : pendingAdjustments.length > 0
-                  ? 'bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-700 hover:from-indigo-700 hover:to-purple-800 text-white'
-                  : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200'
-              }`}
-              title="Abre el Asistente de Ajustes Sugeridos para proponer asientos de diario correctivos automáticamente"
-            >
-              <Wand2 className="w-3.5 h-3.5 text-amber-300" />
-              <span>Ajustes Sugeridos</span>
-              {pendingAdjustments.length > 0 && (
-                <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-amber-400 text-indigo-950 text-[10px] font-black">
-                  {pendingAdjustments.length}
-                </span>
-              )}
-            </button>
-
+            {/* Primary Action 2: Run Automated Reconciliation */}
             <button
               onClick={handleRunReconciliation}
               disabled={isReconciling}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer disabled:opacity-50"
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-white font-bold text-xs shadow-xs transition-all ${
+                isReconciling
+                  ? 'bg-emerald-700 cursor-wait ring-2 ring-emerald-400'
+                  : 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer shadow-sm'
+              }`}
+              title="Conciliar automáticamente usando inteligencia contable"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isReconciling ? 'animate-spin' : ''}`} />
-              <span>{isReconciling ? 'Analizando 5 Etapas...' : 'Conciliar Automáticamente'}</span>
+              <RefreshCw className={`w-3.5 h-3.5 ${isReconciling ? 'animate-spin text-emerald-200' : ''}`} />
+              <span>
+                {isReconciling
+                  ? reconcileProgress
+                    ? `${reconcileProgress.stageName} (${reconcileProgress.progress}%)`
+                    : 'Conciliando...'
+                  : '✨ Conciliar Automáticamente'}
+              </span>
             </button>
 
-            {onOpenExportModal && (
-              <button
-                onClick={onOpenExportModal}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
-                title="Exportar asientos a Excel profesional (.xlsx) para SGT Contable, Profit, Gálac o Saint"
-              >
-                <Download className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Exportar a SGT / ERP</span>
-              </button>
-            )}
+            {/* Manual transaction creation */}
+            <button
+              onClick={() => handleOpenCreateTransaction('BANK')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs border border-slate-200 transition-all cursor-pointer"
+              title="Introducir una nueva transacción manualmente"
+            >
+              <Plus className="w-3.5 h-3.5 text-slate-600" />
+              <span>+ Operación</span>
+            </button>
 
-            {onOpenRestoreModal && (
+            {/* Limpiar Conciliación */}
+            <button
+              onClick={() => setIsClearModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs border border-rose-200 transition-all cursor-pointer"
+              title="Limpiar todo el estado de cuenta cargado y el libro contable para empezar de nuevo"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+              <span>Limpiar</span>
+            </button>
+
+            {/* Secondary Tools Dropdown */}
+            <div className="relative">
               <button
-                onClick={onOpenRestoreModal}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-900 font-bold text-xs border border-indigo-200/90 shadow-2xs transition-all cursor-pointer"
-                title="Guardar o restaurar un snapshot completo de la conciliación en Firestore"
+                onClick={() => setIsToolsMenuOpen(prev => !prev)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs border transition-all cursor-pointer ${
+                  isToolsMenuOpen
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300 shadow-2xs'
+                }`}
               >
-                <History className="w-3.5 h-3.5 text-indigo-700" />
-                <span>Puntos de Restauración</span>
+                <span>⚙️ Herramientas ▾</span>
+                {healthIssuesCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-rose-600 text-white text-[10px] font-black">
+                    {healthIssuesCount}
+                  </span>
+                )}
               </button>
-            )}
+
+              {isToolsMenuOpen && (
+                <div
+                  className="absolute right-0 mt-2 w-64 bg-white rounded-2xl border border-slate-200 shadow-xl p-2 z-50 space-y-1 text-xs animate-in fade-in duration-100"
+                  onClick={() => setIsToolsMenuOpen(false)}
+                >
+                  <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Opciones y Utilidades
+                  </div>
+
+                  {onOpenHealthCheckup && (
+                    <button
+                      onClick={onOpenHealthCheckup}
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-rose-50 text-slate-800 font-medium flex items-center justify-between cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2">
+                        <HeartPulse className="w-3.5 h-3.5 text-rose-600" />
+                        <span>Checkup Saludable</span>
+                      </div>
+                      {healthIssuesCount > 0 && (
+                        <span className="px-1.5 py-0.2 rounded-full bg-rose-600 text-white text-[10px] font-bold">
+                          {healthIssuesCount}
+                        </span>
+                      )}
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => setIsAdjustmentsAssistantOpen(prev => !prev)}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-indigo-50 text-slate-800 font-medium flex items-center justify-between cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Wand2 className="w-3.5 h-3.5 text-amber-500" />
+                      <span>Ajustes Sugeridos</span>
+                    </div>
+                    {pendingAdjustments.length > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-900 text-[10px] font-bold">
+                        {pendingAdjustments.length}
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setUploadModalDefaultSource('BANK');
+                      setUploadModalInitialMode('PASTE');
+                      setIsUploadModalOpen(true);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-800 font-medium flex items-center gap-2 cursor-pointer"
+                  >
+                    <ClipboardPaste className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Pegar Texto de PDF</span>
+                  </button>
+
+                  {onOpenExportModal && (
+                    <button
+                      onClick={onOpenExportModal}
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-800 font-medium flex items-center gap-2 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Exportar a SGT / ERP</span>
+                    </button>
+                  )}
+
+                  {onOpenRestoreModal && (
+                    <button
+                      onClick={onOpenRestoreModal}
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-800 font-medium flex items-center gap-2 cursor-pointer"
+                    >
+                      <History className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Puntos de Restauración</span>
+                    </button>
+                  )}
+
+                  {onOpenEncryptedBackup && (
+                    <button
+                      onClick={onOpenEncryptedBackup}
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-800 font-medium flex items-center gap-2 cursor-pointer"
+                    >
+                      <Lock className="w-3.5 h-3.5 text-slate-700" />
+                      <span>Bóveda Cifrada (AES-256)</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
           </div>
 
         </div>
@@ -542,21 +789,26 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-slate-500 font-medium">Filtrar estado:</span>
+          <div className="flex items-center gap-1.5 text-xs flex-wrap">
+            <span className="text-slate-500 font-medium">Filtrar:</span>
             {[
               { id: 'ALL', label: 'Todos' },
+              { id: 'NO_CUADRAN', label: `⚠️ No Cuadran (${unreconciledCount})`, isAlert: true },
               { id: 'UNMATCHED', label: 'Pendientes' },
+              { id: 'DISCREPANCY', label: `Variaciones (${discrepancyCount})` },
               { id: 'MATCHED_EXACT', label: 'Exactos' },
-              { id: 'MATCHED_FUZZY', label: 'Fuzzy' },
-              { id: 'DISCREPANCY', label: 'Variaciones' }
+              { id: 'MATCHED_FUZZY', label: 'Fuzzy' }
             ].map(f => (
               <button
                 key={f.id}
                 onClick={() => setStatusFilter(f.id)}
                 className={`px-2.5 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
                   statusFilter === f.id
-                    ? 'bg-slate-800 text-white font-semibold'
+                    ? f.isAlert
+                      ? 'bg-rose-700 text-white font-bold ring-2 ring-rose-400'
+                      : 'bg-slate-800 text-white font-semibold'
+                    : f.isAlert && unreconciledCount > 0
+                    ? 'bg-rose-50 text-rose-800 border border-rose-300 hover:bg-rose-100 font-bold'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
@@ -576,6 +828,44 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
             </button>
           )}
         </div>
+
+        {/* Banner de Operaciones que No Cuadran */}
+        {statusFilter === 'NO_CUADRAN' && (
+          <div className="p-3 bg-amber-50/90 border border-amber-300 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-950 animate-in fade-in">
+            <div className="flex items-start sm:items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
+              <div>
+                <span className="font-bold">Mostrando operaciones que no cuadran ({unreconciledCount} registros):</span>
+                <span className="text-amber-900 ml-1">
+                  Aquí visualizas los movimientos con variaciones de monto o pendientes por conciliar. Haz clic en <strong>✏️ Corregir</strong> en cualquier tarjeta para ajustar su monto, fecha o referencia, o pulsa <strong>+ Introducir Operación</strong> para registrar una contrapartida omitida.
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+              <button
+                type="button"
+                onClick={() => handleOpenCreateTransaction('BANK')}
+                className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-[11px] cursor-pointer shadow-2xs"
+              >
+                + Movimiento Banco
+              </button>
+              <button
+                type="button"
+                onClick={() => handleOpenCreateTransaction('LEDGER')}
+                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] cursor-pointer shadow-2xs"
+              >
+                + Asiento Libro
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('ALL')}
+                className="px-2.5 py-1 rounded-lg bg-white border border-amber-300 text-amber-900 hover:bg-amber-100 font-bold text-[11px] cursor-pointer"
+              >
+                Ver Todas
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Notification Toast */}
         {reconcileResultToast && (
@@ -648,6 +938,14 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
               >
                 <FileSpreadsheet className="w-3.5 h-3.5" />
                 <span>+ Archivo</span>
+              </button>
+              <button
+                onClick={() => handleOpenCreateTransaction('BANK')}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-100 hover:bg-sky-200 text-sky-900 font-bold text-[11px] border border-sky-300 cursor-pointer transition-colors"
+                title="Introducir un movimiento bancario manual faltante"
+              >
+                <Plus className="w-3.5 h-3.5 text-sky-700" />
+                <span>+ Manual</span>
               </button>
             </div>
           </div>
@@ -739,6 +1037,11 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                         <p className="text-xs text-slate-700 mt-1 font-medium line-clamp-2">
                           {tx.rawDescription}
                         </p>
+                        {tx.notes && (
+                          <p className="text-[10px] text-emerald-800 font-medium mt-0.5 italic bg-emerald-50/80 px-1.5 py-0.5 rounded border border-emerald-100 line-clamp-1">
+                            💡 {tx.notes}
+                          </p>
+                        )}
                         {tx.counterpartyRif && (
                           <span className="inline-block mt-1 font-mono text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
                             RIF: {tx.counterpartyRif}
@@ -779,9 +1082,28 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                       </div>
                     </div>
 
+                    {/* Alerta de discrepancia si no cuadra el monto */}
+                    {tx.matchingStatus === 'DISCREPANCY' && (
+                      <div className="mt-2 p-1.5 rounded-lg bg-rose-50 border border-rose-200 text-[10px] text-rose-900 flex items-center justify-between">
+                        <div className="flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0" />
+                          <span>Variación de {sym} {Math.abs(tx.discrepancyAmount || 0).toLocaleString('es-VE', { minimumFractionDigits: 2 })} con libros</span>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenEditTransaction(tx);
+                          }}
+                          className="font-bold underline text-rose-800 hover:text-rose-950 cursor-pointer ml-1"
+                        >
+                          Ajustar →
+                        </button>
+                      </div>
+                    )}
+
                     {/* Quick actions per card */}
                     <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                      <span className="text-slate-500 truncate max-w-[200px]">
+                      <span className="text-slate-500 truncate max-w-[150px]">
                         {tx.accountName || 'Sin asignar'}
                       </span>
                       
@@ -797,6 +1119,27 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                             Aprobar
                           </button>
                         )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenEditTransaction(tx);
+                          }}
+                          className="flex items-center gap-0.5 px-2 py-0.5 rounded bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 font-bold text-[10px] cursor-pointer transition-colors"
+                          title="Corregir monto, referencia, fecha o concepto"
+                        >
+                          <Pencil className="w-2.5 h-2.5 text-amber-600" />
+                          <span>Corregir</span>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteTransactionInternal(tx.id);
+                          }}
+                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer transition-colors"
+                          title="Eliminar este movimiento"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -856,6 +1199,14 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
               >
                 <BookOpen className="w-3.5 h-3.5" />
                 <span>+ Pegar Texto</span>
+              </button>
+              <button
+                onClick={() => handleOpenCreateTransaction('LEDGER')}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-900 font-bold text-[11px] border border-emerald-300 cursor-pointer transition-colors"
+                title="Introducir un asiento contable manual faltante"
+              >
+                <Plus className="w-3.5 h-3.5 text-emerald-700" />
+                <span>+ Asiento Manual</span>
               </button>
             </div>
           </div>
@@ -963,6 +1314,11 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                         <p className="text-xs text-slate-700 mt-1 font-medium line-clamp-2">
                           {tx.rawDescription}
                         </p>
+                        {tx.notes && (
+                          <p className="text-[10px] text-emerald-800 font-medium mt-0.5 italic bg-emerald-50/80 px-1.5 py-0.5 rounded border border-emerald-100 line-clamp-1">
+                            💡 {tx.notes}
+                          </p>
+                        )}
                         {tx.accountCode && (
                           <span className="inline-block mt-1 font-mono text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
                             Cta: {tx.accountCode}
@@ -1002,15 +1358,60 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                       </div>
                     </div>
 
+                    {/* Alerta de discrepancia si no cuadra el monto */}
+                    {tx.matchingStatus === 'DISCREPANCY' && (
+                      <div className="mt-2 p-1.5 rounded-lg bg-rose-50 border border-rose-200 text-[10px] text-rose-900 flex items-center justify-between">
+                        <div className="flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0" />
+                          <span>Variación de {sym} {Math.abs(tx.discrepancyAmount || 0).toLocaleString('es-VE', { minimumFractionDigits: 2 })} con extracto</span>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenEditTransaction(tx);
+                          }}
+                          className="font-bold underline text-rose-800 hover:text-rose-950 cursor-pointer ml-1"
+                        >
+                          Ajustar →
+                        </button>
+                      </div>
+                    )}
+
                     <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                      <span className="text-slate-500 font-mono text-[10px]">
-                        ID: {tx.id}
-                      </span>
-                      {tx.matchedWithId && (
-                        <span className="text-emerald-700 font-mono text-[10px] font-semibold">
-                          ↔ Vinculado a {tx.matchedWithId}
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500 font-mono text-[10px]">
+                          ID: {tx.id.slice(-6)}
                         </span>
-                      )}
+                        {tx.matchedWithId && (
+                          <span className="text-emerald-700 font-mono text-[10px] font-semibold">
+                            ↔ {tx.matchedWithId.slice(-6)}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenEditTransaction(tx);
+                          }}
+                          className="flex items-center gap-0.5 px-2 py-0.5 rounded bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 font-bold text-[10px] cursor-pointer transition-colors"
+                          title="Corregir monto, referencia, fecha o concepto del asiento"
+                        >
+                          <Pencil className="w-2.5 h-2.5 text-amber-600" />
+                          <span>Corregir</span>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteTransactionInternal(tx.id);
+                          }}
+                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer transition-colors"
+                          title="Eliminar este asiento contable"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -1273,6 +1674,34 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
         bcvRate={bcvRate}
         selectedBankCode={selectedBank !== 'ALL' ? selectedBank : '0134'}
         onImportComplete={handleImportFromFile}
+      />
+
+      {/* MODAL DE LIMPIAR Y REINICIAR CONCILIACIÓN */}
+      <ClearReconciliationModal
+        isOpen={isClearModalOpen}
+        onClose={() => setIsClearModalOpen(false)}
+        transactions={transactions}
+        selectedBank={selectedBank}
+        currency={currency}
+        onConfirmClear={handleExecuteClear}
+      />
+
+      {/* MODAL DE INTRODUCIR / CORREGIR OPERACIONES */}
+      <TransactionEditorModal
+        isOpen={isTxEditorOpen}
+        onClose={() => {
+          setIsTxEditorOpen(false);
+          setEditingTx(null);
+        }}
+        mode={txEditorMode}
+        initialTransaction={editingTx}
+        defaultSource={txEditorDefaultSource}
+        defaultBankCode={selectedBank !== 'ALL' ? selectedBank : '0134'}
+        currency={currency}
+        bcvRate={bcvRate}
+        companyId={company?.id}
+        onSave={handleSaveTransactionInternal}
+        onDelete={handleDeleteTransactionInternal}
       />
 
     </div>

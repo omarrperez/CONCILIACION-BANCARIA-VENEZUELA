@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { User } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, getDocs, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs, deleteDoc, writeBatch } from 'firebase/firestore';
 import { auth, db, testConnection, handleFirestoreError, OperationType } from './firebase/config';
 import {
   BankTransaction,
@@ -21,7 +21,7 @@ import {
   INITIAL_CASH_LOGS,
   INITIAL_CASH_FLOW_TRACES
 } from './data/sampleData';
-import { calculateProofOfCash, runAutomatedReconciliation } from './services/matchingEngine';
+import { calculateProofOfCash, runAutomatedReconciliation, runAutomatedReconciliationAsync } from './services/matchingEngine';
 import { categorizeTransactionRuleBased } from './services/aiAccountant';
 import {
   exportToSgtContableExcel,
@@ -34,7 +34,7 @@ import {
 } from './services/exportService';
 import { fetchLiveBcvRate, calculateUsdEquivalent } from './services/bcvService';
 import { runVenezuelanAutoMatcher, getLast4Digits } from './services/venezuelanAutoMatcher';
-import { ArrowLeft, Download, FileSpreadsheet, Sparkles, Zap, Bot, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Download, FileSpreadsheet, Sparkles, Zap, Bot, RefreshCw, Building2 } from 'lucide-react';
 
 // Components
 import { Navbar } from './components/Navbar';
@@ -57,6 +57,12 @@ import { RestorePointModal } from './components/RestorePointModal';
 import { PendingClarificationModule } from './components/PendingClarificationModule';
 import { TelegramSyncControl } from './components/TelegramSyncControl';
 import { MonthlyReconciliationVault } from './components/MonthlyReconciliationVault';
+import { DataHealthCheckupModal } from './components/DataHealthCheckupModal';
+import { runDatabaseHealthCheck } from './services/healthCheckService';
+import { EncryptedBackupModal } from './components/EncryptedBackupModal';
+import { NominusDatabasePayload } from './services/encryptedBackupService';
+import { ClearReconciliationOption } from './components/ClearReconciliationModal';
+import { OnboardingModal } from './components/OnboardingModal';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -64,7 +70,7 @@ export default function App() {
 
   // Multi-Empresa State
   const [companies, setCompanies] = useState<CompanyProfile[]>(INITIAL_COMPANIES);
-  const [activeCompanyId, setActiveCompanyId] = useState<string>(INITIAL_COMPANIES[0]?.id || 'comp-san-jose');
+  const [activeCompanyId, setActiveCompanyId] = useState<string>(INITIAL_COMPANIES[0]?.id || 'comp-principal');
   const [selectedBankAccountId, setSelectedBankAccountId] = useState<string>('ALL');
 
   // Empresa activa computada
@@ -87,12 +93,123 @@ export default function App() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [assistantMode, setAssistantMode] = useState<'BANK' | 'LEDGER'>('BANK');
+
+  // Check if onboarding should be shown on initial load
+  useEffect(() => {
+    try {
+      const dismissed = localStorage.getItem('nominus_onboarding_dismissed');
+      if (dismissed !== 'true') {
+        setIsOnboardingOpen(true);
+      }
+    } catch (e) {
+      // Ignore
+    }
+  }, []);
 
   // Direct Upload Modal from Roadmap
   const [isDirectUploadModalOpen, setIsDirectUploadModalOpen] = useState(false);
   const [directUploadSource, setDirectUploadSource] = useState<'BANK' | 'LEDGER'>('BANK');
   const [directUploadMode, setDirectUploadMode] = useState<'FILE' | 'PASTE'>('PASTE');
+
+  // Checkup Saludable Modal State & Contador reactivo de incidencias
+  const [isHealthCheckupModalOpen, setIsHealthCheckupModalOpen] = useState(false);
+  const healthIssuesCount = useMemo(() => {
+    return runDatabaseHealthCheck(transactions).issues.length;
+  }, [transactions]);
+
+  const handleApplyHealthCleanup = async (
+    cleanedTransactions: BankTransaction[],
+    deletedIds: string[]
+  ) => {
+    setTransactions(cleanedTransactions);
+
+    // Si el usuario está autenticado, sincronizar eliminaciones en Firestore
+    if (user && deletedIds.length > 0) {
+      try {
+        const chunkSize = 400;
+        for (let i = 0; i < deletedIds.length; i += chunkSize) {
+          const batch = writeBatch(db);
+          const slice = deletedIds.slice(i, i + chunkSize);
+          slice.forEach(id => {
+            const ref = doc(db, 'users', user.uid, 'transactions', id);
+            batch.delete(ref);
+          });
+          await batch.commit();
+        }
+      } catch (err) {
+        console.warn('Error al depurar duplicados de Firestore:', err);
+      }
+    }
+
+    // Sincronizar transacciones modificadas en Firestore
+    if (user) {
+      try {
+        const modifiedItems = cleanedTransactions.filter(t => (t.notes || '').includes('[Checkup Saludable'));
+        if (modifiedItems.length > 0) {
+          const batch = writeBatch(db);
+          modifiedItems.slice(0, 400).forEach(tx => {
+            const ref = doc(db, 'users', user.uid, 'transactions', tx.id);
+            batch.set(ref, tx, { merge: true });
+          });
+          await batch.commit();
+        }
+      } catch (err) {
+        console.warn('Error al actualizar transacciones saneadas en Firestore:', err);
+      }
+    }
+  };
+
+  // Bóveda Cifrada (AES-256) State & Handler
+  const [isEncryptedBackupModalOpen, setIsEncryptedBackupModalOpen] = useState(false);
+
+  const handleRestoreDatabase = async (restoredData: NominusDatabasePayload) => {
+    if (restoredData.transactions && Array.isArray(restoredData.transactions)) {
+      setTransactions(restoredData.transactions);
+    }
+    if (restoredData.companies && restoredData.companies.length > 0) {
+      setCompanies(restoredData.companies);
+    }
+    if (restoredData.company) {
+      setActiveCompanyId(restoredData.company.id);
+    }
+    if (restoredData.currency) {
+      setCurrency(restoredData.currency);
+    }
+    if (typeof restoredData.initialBalanceBank === 'number') {
+      setInitialBalanceBank(restoredData.initialBalanceBank);
+    }
+    if (typeof restoredData.initialBalanceLedger === 'number') {
+      setInitialBalanceLedger(restoredData.initialBalanceLedger);
+    }
+    if (restoredData.digitalSupports) {
+      setDigitalSupports(restoredData.digitalSupports);
+    }
+    if (restoredData.cashLogs) {
+      setCashLogs(restoredData.cashLogs);
+    }
+    if (restoredData.cashTraces) {
+      setCashTraces(restoredData.cashTraces);
+    }
+
+    if (user && restoredData.transactions && restoredData.transactions.length > 0) {
+      try {
+        const chunkSize = 400;
+        for (let i = 0; i < restoredData.transactions.length; i += chunkSize) {
+          const batch = writeBatch(db);
+          const chunk = restoredData.transactions.slice(i, i + chunkSize);
+          chunk.forEach(tx => {
+            const ref = doc(db, 'users', user.uid, 'transactions', tx.id);
+            batch.set(ref, tx, { merge: true });
+          });
+          await batch.commit();
+        }
+      } catch (err) {
+        console.warn('Error al sincronizar base de datos restaurada en Firestore:', err);
+      }
+    }
+  };
 
   // Saldos Iniciales (Apertura de Periodo) para Banco y Libros
   const [initialBalanceBank, setInitialBalanceBank] = useState<number>(0);
@@ -228,10 +345,14 @@ export default function App() {
     setIsDirectUploadModalOpen(true);
   };
 
-  const handleRunReconciliationFromRoadmap = () => {
-    const res = runAutomatedReconciliation(transactions, 3);
-    setTransactions(res.updatedTransactions);
-    setActiveModule('RECONCILIATION');
+  const handleRunReconciliationFromRoadmap = async () => {
+    try {
+      const res = await runAutomatedReconciliationAsync(transactions, 3);
+      setTransactions(res.updatedTransactions);
+      setActiveModule('RECONCILIATION');
+    } catch (err) {
+      console.error('Error durante la conciliación desde la hoja de ruta:', err);
+    }
   };
 
   const handleImportCompleteFromDirectModal = (
@@ -272,6 +393,17 @@ export default function App() {
   useEffect(() => {
     testConnection();
 
+    // Limpieza de datos residuales de prueba en localStorage al inicio
+    try {
+      const snapKey = 'nominus_reconciliation_snapshots_v1';
+      const raw = localStorage.getItem(snapKey);
+      if (raw && (raw.includes('comp-san-jose') || raw.includes('Comercializadora San José') || raw.includes('0134-0102-33-0100123456'))) {
+        localStorage.removeItem(snapKey);
+      }
+    } catch (e) {
+      // Ignore
+    }
+
     const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
@@ -281,13 +413,31 @@ export default function App() {
           const compSnap = await getDocs(compCollRef);
           if (!compSnap.empty) {
             const loadedCompanies: CompanyProfile[] = [];
-            compSnap.forEach(d => {
+            for (const d of compSnap.docs) {
               const c = d.data() as CompanyProfile;
-              if (c && c.id) loadedCompanies.push(c);
-            });
+              if (c && c.id) {
+                // Si proviene de pruebas anteriores con nombres ficticios, eliminarlo de Firestore
+                const isDummyCompany =
+                  c.id === 'comp-san-jose' ||
+                  c.id === 'comp-dist-caracas' ||
+                  c.companyName?.includes('Comercializadora San José') ||
+                  c.companyName?.includes('Distribuidora Industrial Caracas') ||
+                  c.companyRif === 'J-31234567-8' ||
+                  c.companyRif === 'J-40987654-3';
+
+                if (isDummyCompany) {
+                  deleteDoc(doc(db, 'users', currentUser.uid, 'companies', d.id)).catch(console.warn);
+                } else {
+                  loadedCompanies.push(c);
+                }
+              }
+            }
             if (loadedCompanies.length > 0) {
               setCompanies(loadedCompanies);
               setActiveCompanyId(loadedCompanies[0].id);
+            } else {
+              setCompanies(INITIAL_COMPANIES);
+              setActiveCompanyId(INITIAL_COMPANIES[0].id);
             }
           }
 
@@ -296,10 +446,22 @@ export default function App() {
           const txSnap = await getDocs(txCollRef);
           if (!txSnap.empty) {
             const loadedTx: BankTransaction[] = [];
-            txSnap.forEach(d => {
+            for (const d of txSnap.docs) {
               const t = d.data() as BankTransaction;
-              if (t && t.id) loadedTx.push(t);
-            });
+              if (t && t.id) {
+                const isDummyTx =
+                  t.companyId === 'comp-san-jose' ||
+                  t.companyId === 'comp-dist-caracas' ||
+                  t.bankAccountId === 'bank-101' ||
+                  (t as any).accountNumber === '0134-0102-33-0100123456' ||
+                  t.referenceNum === '0019283';
+                if (isDummyTx) {
+                  deleteDoc(doc(db, 'users', currentUser.uid, 'transactions', d.id)).catch(console.warn);
+                } else {
+                  loadedTx.push(t);
+                }
+              }
+            }
             setTransactions(loadedTx);
           }
 
@@ -308,10 +470,10 @@ export default function App() {
           const traceSnap = await getDocs(traceCollRef);
           if (!traceSnap.empty) {
             const loadedTraces: CashFlowTraceItem[] = [];
-            traceSnap.forEach(d => {
+            for (const d of traceSnap.docs) {
               const tr = d.data() as CashFlowTraceItem;
-              if (tr && tr.id) loadedTraces.push(tr);
-            });
+              if (tr && tr.id && (tr as any).companyId !== 'comp-san-jose') loadedTraces.push(tr);
+            }
             setCashTraces(loadedTraces);
           }
 
@@ -320,10 +482,10 @@ export default function App() {
           const logSnap = await getDocs(logCollRef);
           if (!logSnap.empty) {
             const loadedLogs: CashLogRecord[] = [];
-            logSnap.forEach(d => {
+            for (const d of logSnap.docs) {
               const l = d.data() as CashLogRecord;
               if (l && l.id) loadedLogs.push(l);
-            });
+            }
             setCashLogs(loadedLogs);
           }
         } catch (error) {
@@ -371,6 +533,9 @@ export default function App() {
     setCashLogs([]);
     setCashTraces([]);
     setTxForJustification(null);
+    setInitialBalanceBank(0);
+    setInitialBalanceLedger(0);
+    setSelectedBankAccountId('ALL');
 
     setCompanies(INITIAL_COMPANIES);
     setActiveCompanyId(INITIAL_COMPANIES[0].id);
@@ -410,6 +575,18 @@ export default function App() {
           await deleteDoc(doc(db, 'users', user.uid, 'vault', docItem.id));
         }
 
+        const snapCol = collection(db, 'users', user.uid, 'snapshots');
+        const snapSnap = await getDocs(snapCol);
+        for (const docItem of snapSnap.docs) {
+          await deleteDoc(doc(db, 'users', user.uid, 'snapshots', docItem.id));
+        }
+
+        const compCol = collection(db, 'users', user.uid, 'companies');
+        const compSnap = await getDocs(compCol);
+        for (const docItem of compSnap.docs) {
+          await deleteDoc(doc(db, 'users', user.uid, 'companies', docItem.id));
+        }
+
         const userDocRef = doc(db, 'users', user.uid);
         await setDoc(userDocRef, {
           uid: user.uid,
@@ -425,6 +602,119 @@ export default function App() {
         });
       } catch (err) {
         console.warn('Error purgando documentos de Firestore:', err);
+      }
+    }
+  };
+
+  // Limpieza Selectiva de Conciliación (Extracto Bancario, Libro o Ambos)
+  const handleClearReconciliation = async (
+    option: ClearReconciliationOption,
+    scope: 'ALL_BANKS' | 'SELECTED_BANK_ONLY'
+  ) => {
+    let toKeep: BankTransaction[] = [];
+    let toDeleteIds: string[] = [];
+
+    const isTarget = (t: BankTransaction) => {
+      if (scope === 'SELECTED_BANK_ONLY' && selectedBankAccountId !== 'ALL') {
+        return t.bankCode === selectedBankAccountId || t.bankAccountId === selectedBankAccountId;
+      }
+      return true;
+    };
+
+    if (option === 'ALL') {
+      toDeleteIds = transactions.filter(isTarget).map(t => t.id);
+      toKeep = transactions.filter(t => !isTarget(t));
+      setInitialBalanceBank(0);
+      setInitialBalanceLedger(0);
+    } else if (option === 'BANK') {
+      toDeleteIds = transactions.filter(t => isTarget(t) && t.source === 'BANK').map(t => t.id);
+      toKeep = transactions.filter(t => !(isTarget(t) && t.source === 'BANK'));
+      setInitialBalanceBank(0);
+    } else if (option === 'LEDGER') {
+      toDeleteIds = transactions.filter(t => isTarget(t) && t.source === 'LEDGER').map(t => t.id);
+      toKeep = transactions.filter(t => !(isTarget(t) && t.source === 'LEDGER'));
+      setInitialBalanceLedger(0);
+    } else if (option === 'RESET_STATUS') {
+      toKeep = transactions.map(t => {
+        if (isTarget(t)) {
+          return {
+            ...t,
+            matchingStatus: 'UNMATCHED',
+            matchedWithId: undefined,
+            matchScore: 0,
+            discrepancyAmount: undefined
+          };
+        }
+        return t;
+      });
+    }
+
+    setTransactions(toKeep);
+
+    // Sincronizar eliminaciones con Firestore
+    if (user && toDeleteIds.length > 0) {
+      try {
+        const chunkSize = 400;
+        for (let i = 0; i < toDeleteIds.length; i += chunkSize) {
+          const batch = writeBatch(db);
+          const chunk = toDeleteIds.slice(i, i + chunkSize);
+          chunk.forEach(id => {
+            batch.delete(doc(db, 'users', user.uid, 'transactions', id));
+          });
+          await batch.commit();
+        }
+      } catch (err) {
+        console.warn('Error eliminando transacciones en Firestore:', err);
+      }
+    }
+
+    // Sincronizar reset de estados con Firestore
+    if (user && option === 'RESET_STATUS') {
+      try {
+        const chunkSize = 400;
+        for (let i = 0; i < toKeep.length; i += chunkSize) {
+          const batch = writeBatch(db);
+          const chunk = toKeep.slice(i, i + chunkSize);
+          chunk.forEach(tx => {
+            batch.set(doc(db, 'users', user.uid, 'transactions', tx.id), tx, { merge: true });
+          });
+          await batch.commit();
+        }
+      } catch (err) {
+        console.warn('Error restableciendo estados en Firestore:', err);
+      }
+    }
+  };
+
+  // Guardar creación o edición de una transacción individual
+  const handleSaveTransaction = async (tx: BankTransaction) => {
+    setTransactions(prev => {
+      const idx = prev.findIndex(t => t.id === tx.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = tx;
+        return copy;
+      }
+      return [tx, ...prev];
+    });
+
+    if (user) {
+      try {
+        await setDoc(doc(db, 'users', user.uid, 'transactions', tx.id), tx, { merge: true });
+      } catch (err) {
+        console.warn('Error guardando transacción en Firestore:', err);
+      }
+    }
+  };
+
+  // Eliminar una transacción individual
+  const handleDeleteTransaction = async (txId: string) => {
+    setTransactions(prev => prev.filter(t => t.id !== txId));
+    if (user) {
+      try {
+        await deleteDoc(doc(db, 'users', user.uid, 'transactions', txId));
+      } catch (err) {
+        console.warn('Error eliminando transacción en Firestore:', err);
       }
     }
   };
@@ -454,13 +744,24 @@ export default function App() {
     setActiveModule('RECONCILIATION');
 
     if (user) {
-      try {
-        for (const tx of matchReport.updatedTransactions) {
-          await setDoc(doc(db, 'users', user.uid, 'transactions', tx.id), tx);
+      // Guardar en lotes atómicos (writeBatch) en segundo plano para no congelar la UI ni saturar la red
+      (async () => {
+        try {
+          const itemsToSave = matchReport.updatedTransactions;
+          const chunkSize = 400;
+          for (let i = 0; i < itemsToSave.length; i += chunkSize) {
+            const batch = writeBatch(db);
+            const slice = itemsToSave.slice(i, i + chunkSize);
+            slice.forEach(tx => {
+              const ref = doc(db, 'users', user.uid, 'transactions', tx.id);
+              batch.set(ref, tx, { merge: true });
+            });
+            await batch.commit();
+          }
+        } catch (err) {
+          console.warn('Error guardando transacciones en Firestore:', err);
         }
-      } catch (err) {
-        console.warn('Error guardando transacciones en Firestore:', err);
-      }
+      })();
     }
   };
 
@@ -582,6 +883,10 @@ export default function App() {
         onOpenSettings={() => setIsSettingsModalOpen(true)}
         onOpenExportModal={() => setIsExportModalOpen(true)}
         onOpenRestoreModal={() => setIsRestoreModalOpen(true)}
+        onOpenEncryptedBackup={() => setIsEncryptedBackupModalOpen(true)}
+        onOpenHealthCheckup={() => setIsHealthCheckupModalOpen(true)}
+        onOpenOnboarding={() => setIsOnboardingOpen(true)}
+        healthIssuesCount={healthIssuesCount}
         onUpdateBcvRate={handleUpdateBcvRate}
         onNavigateToClarify={() => setActiveModule('PENDIENTES_ACLARAR')}
         unclarifiedCount={unclarifiedCount}
@@ -710,6 +1015,39 @@ export default function App() {
           {activeModule === 'DASHBOARD' && activePage === 1 && (
             <div className="space-y-6">
               
+              {/* Notificación de Sistema Limpio Listo para Cargar */}
+              {transactions.length === 0 && (company.bankAccounts || []).length === 0 && (
+                <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-sky-50 border-2 border-emerald-300/80 p-4 rounded-2xl shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                      <Sparkles className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-extrabold text-slate-900">
+                          Sistema Listo: Base de Datos Limpia (Sin Datos Ficticios)
+                        </h3>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          Listo para vaciar información
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
+                        No hay empresas ni transacciones inventadas cargadas. Configura la Razón Social y RIF real de tu empresa, agrega tus cuentas bancarias venezolanas (Mercantil, Banesco, BDV, BNC, Bancamiga, etc.) y comienza a vaciar tus movimientos bancarios y contables.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                    <button
+                      onClick={() => setIsSettingsModalOpen(true)}
+                      className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs cursor-pointer flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <Building2 className="w-4 h-4" />
+                      <span>Configurar Empresa y Bancos</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* PÁGINA 1: Flujo Guiado Paso a Paso (Paso 1, 2, 3, 4, 5 con bordes de colores) */}
               <ReconciliationProcessRoadmap
                 transactions={transactions}
@@ -875,6 +1213,11 @@ export default function App() {
                   onNavigateToResults={() => setActiveModule('RECONCILIATION_RESULTS')}
                   onOpenExportModal={() => setIsExportModalOpen(true)}
                   onOpenRestoreModal={() => setIsRestoreModalOpen(true)}
+                  onOpenHealthCheckup={() => setIsHealthCheckupModalOpen(true)}
+                  onOpenEncryptedBackup={() => setIsEncryptedBackupModalOpen(true)}
+                  onClearReconciliation={handleClearReconciliation}
+                  onSaveTransaction={handleSaveTransaction}
+                  onDeleteTransaction={handleDeleteTransaction}
                 />
               </div>
 
@@ -954,6 +1297,11 @@ export default function App() {
               onNavigateToResults={() => setActiveModule('RECONCILIATION_RESULTS')}
               onOpenExportModal={() => setIsExportModalOpen(true)}
               onOpenRestoreModal={() => setIsRestoreModalOpen(true)}
+              onOpenHealthCheckup={() => setIsHealthCheckupModalOpen(true)}
+              onOpenEncryptedBackup={() => setIsEncryptedBackupModalOpen(true)}
+              onClearReconciliation={handleClearReconciliation}
+              onSaveTransaction={handleSaveTransaction}
+              onDeleteTransaction={handleDeleteTransaction}
             />
           )}
 
@@ -1300,6 +1648,7 @@ export default function App() {
         initialBalanceBank={initialBalanceBank}
         initialBalanceLedger={initialBalanceLedger}
         onRestoreComplete={handleRestoreComplete}
+        onOpenEncryptedBackup={() => setIsEncryptedBackupModalOpen(true)}
       />
 
       {isDirectUploadModalOpen && (
@@ -1313,6 +1662,37 @@ export default function App() {
           onImportComplete={handleImportCompleteFromDirectModal}
         />
       )}
+
+      <DataHealthCheckupModal
+        isOpen={isHealthCheckupModalOpen}
+        onClose={() => setIsHealthCheckupModalOpen(false)}
+        transactions={transactions}
+        onApplyCleanup={handleApplyHealthCleanup}
+      />
+
+      <EncryptedBackupModal
+        isOpen={isEncryptedBackupModalOpen}
+        onClose={() => setIsEncryptedBackupModalOpen(false)}
+        activeCompany={company}
+        companies={companies}
+        transactions={transactions}
+        currency={currency}
+        bcvRate={company.bcvRate}
+        initialBalanceBank={initialBalanceBank}
+        initialBalanceLedger={initialBalanceLedger}
+        digitalSupports={digitalSupports}
+        cashLogs={cashLogs}
+        cashTraces={cashTraces}
+        onRestoreDatabase={handleRestoreDatabase}
+      />
+
+      <OnboardingModal
+        isOpen={isOnboardingOpen}
+        onClose={() => setIsOnboardingOpen(false)}
+        onStartUpload={(source) => handleOpenUploadFromRoadmap(source, 'PASTE')}
+        onNavigateToWorkspace={() => setActiveModule('RECONCILIATION')}
+        onNavigateToResults={() => setActiveModule('RECONCILIATION_RESULTS')}
+      />
 
     </div>
   );

@@ -447,7 +447,7 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
                 value={formData.companyName}
                 onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
                 className="w-full px-3.5 py-2 border border-slate-300 rounded-xl font-medium"
-                placeholder="ej. Comercializadora San José, C.A."
+                placeholder="ej. Inversiones y Servicios Comerciales, C.A."
                 required
               />
             </div>
@@ -625,6 +625,60 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
                 )}
               </div>
             </div>
+
+            {/* Zona de Limpieza y Vaciado Total de Datos de Prueba */}
+            {onPurgeAllData && (
+              <div className="p-3.5 rounded-2xl bg-rose-50/80 border border-rose-200 space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Trash2 className="w-4 h-4 text-rose-600 shrink-0" />
+                    <div>
+                      <h4 className="text-xs font-black text-rose-950">
+                        Vaciado de Base de Datos (Comenzar 100% Limpio)
+                      </h4>
+                      <p className="text-[11px] text-rose-800 leading-tight">
+                        Elimina cualquier registro de prueba previo para que el sistema quede en blanco y listo para vaciar tu contabilidad real.
+                      </p>
+                    </div>
+                  </div>
+
+                  {!showPurgeConfirm ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowPurgeConfirm(true)}
+                      className="px-3 py-1.5 text-xs font-bold text-rose-700 hover:text-white hover:bg-rose-600 border border-rose-300 rounded-xl transition-colors cursor-pointer shrink-0"
+                    >
+                      Vaciar / Purgar Todo...
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setShowPurgeConfirm(false)}
+                        className="px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-200 rounded-lg cursor-pointer font-semibold"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleExecutePurge}
+                        disabled={isPurging}
+                        className="px-3 py-1 text-xs font-black text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-xs cursor-pointer flex items-center gap-1"
+                      >
+                        {isPurging ? 'Vaciando...' : 'Confirmar Vaciado'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {purgedSuccess && (
+                  <div className="p-2 rounded-xl bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-bold flex items-center gap-1.5">
+                    <Check className="w-4 h-4 text-emerald-700" />
+                    <span>¡Base de datos vaciada con éxito! No existen datos ficticios en el sistema.</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
               {savedSuccess ? (
@@ -995,7 +1049,7 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
                       type="text"
                       value={newCompanyData.companyName}
                       onChange={(e) => setNewCompanyData({ ...newCompanyData, companyName: e.target.value })}
-                      placeholder="ej. Distribuidora San José, C.A."
+                      placeholder="ej. Empresa Venezolana 2, C.A."
                       className="w-full px-3 py-1.5 border border-purple-300 rounded-xl bg-white text-xs"
                       required
                     />

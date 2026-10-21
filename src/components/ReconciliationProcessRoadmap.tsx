@@ -482,6 +482,65 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
 
       </div>
 
+      {/* BANNER UNIFICADO DE SIGUIENTE PASO RECOMENDADO - Elimina la desorientación al final de la página */}
+      <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4 border border-slate-800">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-400 text-slate-950">
+              📌 Paso Recomendado Ahora
+            </span>
+            <span className="text-xs font-bold text-slate-300">
+              {currentStep === 1 && 'Paso 1: Carga de Archivos'}
+              {currentStep === 2 && 'Paso 2: Saldos Iniciales'}
+              {currentStep === 3 && 'Paso 3: Conciliación Automática'}
+              {currentStep === 4 && 'Paso 4: Revisión de Partidas y Ajustes'}
+              {currentStep === 5 && 'Paso 5: Cierre y Exportación'}
+            </span>
+          </div>
+          <p className="text-xs sm:text-sm font-semibold text-slate-100 max-w-xl">
+            {!hasBothData && 'Aún falta importar datos. Carga tu extracto bancario o pega el texto copiado de tu PDF para comenzar.'}
+            {hasBothData && matchedTx.length === 0 && '¡Tus datos están cargados! Pulsa el botón a la derecha para ejecutar la conciliación en 1 segundo.'}
+            {hasBothData && matchedTx.length > 0 && unmatchedTx.length > 0 && `Se han conciliado ${matchedTx.length} partidas. Quedan ${unmatchedTx.length} pendientes por revisar en la Mesa de Trabajo.`}
+            {hasBothData && unmatchedTx.length === 0 && '¡Excelente! Todos los movimientos están cuadrados. Puedes revisar el informe o exportar tu archivo Excel.'}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {!hasBothData ? (
+            <button
+              onClick={() => onOpenUploadModal('BANK', 'PASTE')}
+              className="px-6 py-3 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 text-white font-black text-xs shadow-lg cursor-pointer transition-all flex items-center gap-2"
+            >
+              <ClipboardPaste className="w-4 h-4" />
+              <span>Cargar o Pegar Texto del Banco →</span>
+            </button>
+          ) : matchedTx.length === 0 ? (
+            <button
+              onClick={onRunReconciliation}
+              className="px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-black text-xs shadow-lg cursor-pointer transition-all flex items-center gap-2 animate-pulse"
+            >
+              <Zap className="w-4 h-4" />
+              <span>⚡ Ejecutar Conciliación Automática →</span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onNavigateToWorkspace}
+                className="px-5 py-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-extrabold text-xs shadow-md cursor-pointer transition-all flex items-center gap-1.5"
+              >
+                <span>Mesa de Trabajo →</span>
+              </button>
+              <button
+                onClick={onNavigateToResults}
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md cursor-pointer transition-all flex items-center gap-1.5"
+              >
+                <span>Ver Diagnóstico y Cédula →</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
     </div>
   );
 };

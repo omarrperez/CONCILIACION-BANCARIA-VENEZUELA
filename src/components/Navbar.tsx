@@ -15,7 +15,10 @@ import {
   Plus,
   Check,
   CreditCard,
-  ShieldCheck
+  ShieldCheck,
+  HeartPulse,
+  Lock,
+  HelpCircle
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { CompanyProfile, CompanyBankAccount, CurrencyType } from '../types/accounting';
@@ -35,6 +38,10 @@ interface NavbarProps {
   onOpenSettings: () => void;
   onOpenExportModal: () => void;
   onOpenRestoreModal?: () => void;
+  onOpenHealthCheckup?: () => void;
+  onOpenEncryptedBackup?: () => void;
+  onOpenOnboarding?: () => void;
+  healthIssuesCount?: number;
   onUpdateBcvRate: (newRate: number) => void;
   onNavigateToClarify?: () => void;
   unclarifiedCount?: number;
@@ -58,6 +65,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenSettings,
   onOpenExportModal,
   onOpenRestoreModal,
+  onOpenHealthCheckup,
+  onOpenEncryptedBackup,
+  onOpenOnboarding,
+  healthIssuesCount = 0,
   onUpdateBcvRate,
   onNavigateToClarify,
   unclarifiedCount = 0,
@@ -212,6 +223,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                       ...{activeBankAccount.accountNumber.slice(-6)}
                     </span>
                   </>
+                ) : bankAccounts.length === 0 ? (
+                  <span className="text-emerald-700 font-bold flex items-center gap-1">
+                    <Plus className="w-3 h-3" /> Registrar Banco (0)
+                  </span>
                 ) : (
                   <span className="text-slate-700 font-bold">🏦 Todos los Bancos ({bankAccounts.length})</span>
                 )}
@@ -227,21 +242,28 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
 
                   <div className="max-h-64 overflow-y-auto py-1">
-                    <button
-                      onClick={() => {
-                        onSelectBankAccount('ALL');
-                        setIsBankDropdownOpen(false);
-                      }}
-                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-slate-50 transition-colors cursor-pointer ${
-                        selectedBankAccountId === 'ALL' ? 'bg-slate-100 font-bold text-slate-900' : 'text-slate-700'
-                      }`}
-                    >
-                      <div>
-                        <p className="font-bold">🏢 Consolidado: Todos los Bancos</p>
-                        <p className="text-[10px] text-slate-400">Ver transacciones de todas las cuentas registradas</p>
+                    {bankAccounts.length === 0 ? (
+                      <div className="p-3 text-center text-xs space-y-1">
+                        <p className="font-bold text-slate-800">No hay bancos registrados</p>
+                        <p className="text-[11px] text-slate-500">Agrega tus cuentas bancarias venezolanas reales para comenzar a conciliar.</p>
                       </div>
-                      {selectedBankAccountId === 'ALL' && <Check className="w-4 h-4 text-emerald-600" />}
-                    </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          onSelectBankAccount('ALL');
+                          setIsBankDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-slate-50 transition-colors cursor-pointer ${
+                          selectedBankAccountId === 'ALL' ? 'bg-slate-100 font-bold text-slate-900' : 'text-slate-700'
+                        }`}
+                      >
+                        <div>
+                          <p className="font-bold">🏢 Consolidado: Todos los Bancos</p>
+                          <p className="text-[10px] text-slate-400">Ver transacciones de todas las cuentas registradas</p>
+                        </div>
+                        {selectedBankAccountId === 'ALL' && <Check className="w-4 h-4 text-emerald-600" />}
+                      </button>
+                    )}
 
                     {bankAccounts.map(bank => {
                       const bankDef = getBankDefinition(bank.bankCode);
@@ -400,6 +422,52 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 <History className="w-3.5 h-3.5 text-indigo-700" />
                 <span>Histórico</span>
+              </button>
+            )}
+
+            {/* Bóveda Cifrada AES-256 */}
+            {onOpenEncryptedBackup && (
+              <button
+                onClick={onOpenEncryptedBackup}
+                title="Bóveda Cifrada: Exportar/Importar base de datos completa con clave local (AES-256)"
+                className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition-colors cursor-pointer shadow-2xs"
+              >
+                <Lock className="w-3.5 h-3.5 text-indigo-300" />
+                <span className="hidden xl:inline">Bóveda</span>
+                <span>AES-256</span>
+              </button>
+            )}
+
+            {/* Checkup Saludable de Transacciones */}
+            {onOpenHealthCheckup && (
+              <button
+                onClick={onOpenHealthCheckup}
+                title="Checkup Saludable: Audita duplicados y referencias mal formadas con saneamiento en 1 clic"
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  healthIssuesCount > 0
+                    ? 'bg-rose-50 text-rose-800 border border-rose-300 hover:bg-rose-100 ring-1 ring-rose-200'
+                    : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
+                }`}
+              >
+                <HeartPulse className={`w-3.5 h-3.5 ${healthIssuesCount > 0 ? 'text-rose-600 animate-pulse' : 'text-emerald-600'}`} />
+                <span className="hidden sm:inline">Salud</span>
+                {healthIssuesCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-rose-600 text-white text-[10px] font-black">
+                    {healthIssuesCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* Guía Rápida Tutorial */}
+            {onOpenOnboarding && (
+              <button
+                onClick={onOpenOnboarding}
+                title="Guía Rápida Interactiva de 3 Pasos"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-100/80 text-emerald-950 hover:bg-emerald-200/80 border border-emerald-300 text-xs font-bold transition-colors cursor-pointer"
+              >
+                <HelpCircle className="w-3.5 h-3.5 text-emerald-700" />
+                <span className="hidden sm:inline">Guía Rápida</span>
               </button>
             )}
 
