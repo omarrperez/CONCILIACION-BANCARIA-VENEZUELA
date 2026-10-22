@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { User } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, getDocs, deleteDoc, writeBatch } from 'firebase/firestore';
-import { auth, db, testConnection, handleFirestoreError, OperationType } from './firebase/config';
+import { auth, db, testConnection, handleFirestoreError, OperationType, logoutUser } from './firebase/config';
 import {
   BankTransaction,
   CashLogRecord,
@@ -61,16 +61,63 @@ import { DataHealthCheckupModal } from './components/DataHealthCheckupModal';
 import { runDatabaseHealthCheck } from './services/healthCheckService';
 import { EncryptedBackupModal } from './components/EncryptedBackupModal';
 import { NominusDatabasePayload } from './services/encryptedBackupService';
-import { ClearReconciliationOption } from './components/ClearReconciliationModal';
+import { ClearReconciliationModal, ClearReconciliationOption } from './components/ClearReconciliationModal';
 import { OnboardingModal } from './components/OnboardingModal';
+import { InteractiveTourOverlay } from './components/InteractiveTourOverlay';
+import {
+  loadLocalTransactions,
+  saveLocalTransactions,
+  loadLocalCompanies,
+  saveLocalCompanies,
+  loadLocalBalances,
+  saveLocalBalances,
+  mergeTransactionsList
+} from './services/persistenceService';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [localUser, setLocalUser] = useState<any>(() => {
+    try {
+      const saved = localStorage.getItem('nominus_active_user_session');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const activeUser = user || localUser;
+
+  const handleLoginAsLocalUser = (email: string, displayName: string) => {
+    const usr = {
+      uid: `usr-${email.replace(/[^a-zA-Z0-9]/g, '_')}`,
+      email,
+      displayName,
+      photoURL: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(displayName)}`
+    };
+    setLocalUser(usr);
+    localStorage.setItem('nominus_active_user_session', JSON.stringify(usr));
+  };
+
+  const handleLogoutUser = async () => {
+    if (user) {
+      try {
+        await logoutUser();
+      } catch (e) {
+        console.warn('Logout error:', e);
+      }
+    }
+    setLocalUser(null);
+    localStorage.removeItem('nominus_active_user_session');
+  };
+
   const [currency, setCurrency] = useState<CurrencyType>('VES');
 
   // Multi-Empresa State
-  const [companies, setCompanies] = useState<CompanyProfile[]>(INITIAL_COMPANIES);
-  const [activeCompanyId, setActiveCompanyId] = useState<string>(INITIAL_COMPANIES[0]?.id || 'comp-principal');
+  const [companies, setCompanies] = useState<CompanyProfile[]>(() => loadLocalCompanies());
+  const [activeCompanyId, setActiveCompanyId] = useState<string>(() => {
+    const loaded = loadLocalCompanies();
+    return loaded[0]?.id || 'comp-principal';
+  });
   const [selectedBankAccountId, setSelectedBankAccountId] = useState<string>('ALL');
 
   // Empresa activa computada
@@ -78,12 +125,13 @@ export default function App() {
     return companies.find(c => c.id === activeCompanyId) || companies[0] || DEFAULT_COMPANY_PROFILE;
   }, [companies, activeCompanyId]);
 
-  const [transactions, setTransactions] = useState<BankTransaction[]>(INITIAL_BANK_TRANSACTIONS);
+  const [transactions, setTransactions] = useState<BankTransaction[]>(() => loadLocalTransactions());
   const [cashLogs, setCashLogs] = useState<CashLogRecord[]>(INITIAL_CASH_LOGS);
   const [cashTraces, setCashTraces] = useState<CashFlowTraceItem[]>(INITIAL_CASH_FLOW_TRACES);
   const [digitalSupports, setDigitalSupports] = useState<DigitalSupportAttachment[]>([]);
   const [activeModule, setActiveModule] = useState<AppModuleId>('DASHBOARD');
   const [activePage, setActivePage] = useState<1 | 2>(1); // 1 = Proceso Conciliación Mensual, 2 = Panel Módulos Operativos
+  const [showFullWorkspaceOnHome, setShowFullWorkspaceOnHome] = useState(false);
   
   // Selected transaction passed to Justification Suite
   const [txForJustification, setTxForJustification] = useState<BankTransaction | null>(null);
@@ -93,7 +141,9 @@ export default function App() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  const [isTourOverlayOpen, setIsTourOverlayOpen] = useState(false);
   const [assistantMode, setAssistantMode] = useState<'BANK' | 'LEDGER'>('BANK');
 
   // Check if onboarding should be shown on initial load
@@ -212,8 +262,21 @@ export default function App() {
   };
 
   // Saldos Iniciales (Apertura de Periodo) para Banco y Libros
-  const [initialBalanceBank, setInitialBalanceBank] = useState<number>(0);
-  const [initialBalanceLedger, setInitialBalanceLedger] = useState<number>(0);
+  const [initialBalanceBank, setInitialBalanceBank] = useState<number>(() => loadLocalBalances().initialBalanceBank);
+  const [initialBalanceLedger, setInitialBalanceLedger] = useState<number>(() => loadLocalBalances().initialBalanceLedger);
+
+  // Auto-Espejo e Inmunidad a Recargas en LocalStorage
+  useEffect(() => {
+    saveLocalTransactions(transactions);
+  }, [transactions]);
+
+  useEffect(() => {
+    saveLocalCompanies(companies);
+  }, [companies]);
+
+  useEffect(() => {
+    saveLocalBalances(initialBalanceBank, initialBalanceLedger);
+  }, [initialBalanceBank, initialBalanceLedger]);
 
   // Controladores Multi-Empresa & Multi-Banco
   const handleSelectCompany = (compNameOrId: string) => {
@@ -433,15 +496,19 @@ export default function App() {
               }
             }
             if (loadedCompanies.length > 0) {
-              setCompanies(loadedCompanies);
+              setCompanies(prev => {
+                const map = new Map<string, CompanyProfile>();
+                loadedCompanies.forEach(c => map.set(c.id, c));
+                prev.forEach(c => map.set(c.id, c));
+                const mergedComps = Array.from(map.values());
+                saveLocalCompanies(mergedComps);
+                return mergedComps;
+              });
               setActiveCompanyId(loadedCompanies[0].id);
-            } else {
-              setCompanies(INITIAL_COMPANIES);
-              setActiveCompanyId(INITIAL_COMPANIES[0].id);
             }
           }
 
-          // Load user's real transactions from subcollection if any
+          // Load user's real transactions from subcollection if any and merge with local state
           const txCollRef = collection(db, 'users', currentUser.uid, 'transactions');
           const txSnap = await getDocs(txCollRef);
           if (!txSnap.empty) {
@@ -462,7 +529,13 @@ export default function App() {
                 }
               }
             }
-            setTransactions(loadedTx);
+            if (loadedTx.length > 0) {
+              setTransactions(prev => {
+                const merged = mergeTransactionsList(prev, loadedTx);
+                saveLocalTransactions(merged);
+                return merged;
+              });
+            }
           }
 
           // Load user's real cash traces if any
@@ -877,15 +950,18 @@ export default function App() {
         onSelectCompany={handleSelectCompany}
         selectedBankAccountId={selectedBankAccountId}
         onSelectBankAccount={setSelectedBankAccountId}
-        user={user}
+        user={activeUser}
         currency={currency}
         onCurrencyToggle={setCurrency}
         onOpenSettings={() => setIsSettingsModalOpen(true)}
         onOpenExportModal={() => setIsExportModalOpen(true)}
+        onOpenClearModal={() => setIsClearModalOpen(true)}
         onOpenRestoreModal={() => setIsRestoreModalOpen(true)}
         onOpenEncryptedBackup={() => setIsEncryptedBackupModalOpen(true)}
         onOpenHealthCheckup={() => setIsHealthCheckupModalOpen(true)}
         onOpenOnboarding={() => setIsOnboardingOpen(true)}
+        onLoginAsLocalUser={handleLoginAsLocalUser}
+        onLogoutUser={handleLogoutUser}
         healthIssuesCount={healthIssuesCount}
         onUpdateBcvRate={handleUpdateBcvRate}
         onNavigateToClarify={() => setActiveModule('PENDIENTES_ACLARAR')}
@@ -1066,160 +1142,190 @@ export default function App() {
                 onRunReconciliation={handleRunReconciliationFromRoadmap}
                 onUpdateInitialBalances={handleUpdateInitialBalances}
                 onOpenRestoreModal={() => setIsRestoreModalOpen(true)}
+                onOpenTourOverlay={() => setIsTourOverlayOpen(true)}
+                onOpenClearModal={() => setIsClearModalOpen(true)}
               />
 
-              {/* Split teaser and quick actions */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                
-                {/* Proof of Cash Teaser Card */}
-                <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                    <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                        Cédula de Cierre Mensual
-                      </span>
-                      <h3 className="text-sm font-bold text-slate-900 mt-1">
-                        Ecuación de Conciliación Matemática y Prueba de Efectivo
-                      </h3>
-                    </div>
+              {/* Toggle Banner for showing full workspace / cards on Home page */}
+              {!showFullWorkspaceOnHome ? (
+                <div className="p-4 rounded-2xl bg-slate-100/90 border border-slate-200/90 flex flex-col sm:flex-row items-center justify-between gap-3 text-slate-700">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-800">
+                      💡 ¿Deseas explorar la Mesa de Trabajo y Cédula completa en esta misma pantalla?
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setShowFullWorkspaceOnHome(true)}
+                    className="px-4 py-2 rounded-xl bg-white hover:bg-slate-200 text-slate-900 font-extrabold text-xs border border-slate-300 shadow-2xs transition-colors cursor-pointer shrink-0"
+                  >
+                    Mostrar Mesa de Trabajo y Cédula Abajo 👇
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-6 pt-2">
+                  <div className="flex justify-end">
                     <button
-                      onClick={() => setIsProofModalOpen(true)}
-                      className="px-3 py-1.5 rounded-xl bg-slate-900 text-white font-bold text-xs hover:bg-slate-800 transition-colors cursor-pointer"
+                      onClick={() => setShowFullWorkspaceOnHome(false)}
+                      className="px-4 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs transition-colors cursor-pointer"
                     >
-                      Ver Detalle Completo (4 Columnas) →
+                      ▲ Ocultar Vista Avanzada (Volver a Modo Enfocado)
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                      <span className="text-[10px] text-slate-500 font-semibold block">Saldo Extracto Banco</span>
-                      <span className="font-mono font-bold text-slate-900 text-sm">
-                        {currency === 'VES' ? 'Bs.' : '$'} {proofOfCash.finalBalanceBank.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
-                      </span>
+                  {/* Split teaser and quick actions */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                    
+                    {/* Proof of Cash Teaser Card */}
+                    <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs space-y-4">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                            Cédula de Cierre Mensual
+                          </span>
+                          <h3 className="text-sm font-bold text-slate-900 mt-1">
+                            Ecuación de Conciliación Matemática y Prueba de Efectivo
+                          </h3>
+                        </div>
+                        <button
+                          onClick={() => setIsProofModalOpen(true)}
+                          className="px-3 py-1.5 rounded-xl bg-slate-900 text-white font-bold text-xs hover:bg-slate-800 transition-colors cursor-pointer"
+                        >
+                          Ver Detalle Completo (4 Columnas) →
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                        <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                          <span className="text-[10px] text-slate-500 font-semibold block">Saldo Extracto Banco</span>
+                          <span className="font-mono font-bold text-slate-900 text-sm">
+                            {currency === 'VES' ? 'Bs.' : '$'} {proofOfCash.finalBalanceBank.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-emerald-50/60 border border-emerald-100">
+                          <span className="text-[10px] text-emerald-800 font-semibold block">(+) Depósitos Tránsito</span>
+                          <span className="font-mono font-bold text-emerald-700 text-sm">
+                            +{currency === 'VES' ? 'Bs.' : '$'} {proofOfCash.depositsInTransit.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-rose-50/60 border border-rose-100">
+                          <span className="text-[10px] text-rose-800 font-semibold block">(-) Cheques Pendientes</span>
+                          <span className="font-mono font-bold text-rose-700 text-sm">
+                            -{currency === 'VES' ? 'Bs.' : '$'} {proofOfCash.outstandingChecks.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-sky-50/70 border border-sky-100">
+                          <span className="text-[10px] text-sky-800 font-semibold block">(=) Saldo Conciliado</span>
+                          <span className="font-mono font-bold text-sky-900 text-sm">
+                            {currency === 'VES' ? 'Bs.' : '$'} {proofOfCash.reconciledBank.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-50 text-xs text-slate-600 flex items-center justify-between">
+                        <span>Mayor General de Libros: <strong>{currency === 'VES' ? 'Bs.' : '$'} {proofOfCash.finalBalanceLedger.toLocaleString('es-VE', { minimumFractionDigits: 2 })}</strong></span>
+                        <span className="font-mono text-emerald-700 font-bold">
+                          {proofOfCash.isBalanced ? '✓ Prueba de Caja Cuadrada al 100%' : `Variación: ${currency === 'VES' ? 'Bs.' : '$'} ${proofOfCash.difference.toFixed(2)}`}
+                        </span>
+                      </div>
                     </div>
 
-                    <div className="p-3 rounded-xl bg-emerald-50/60 border border-emerald-100">
-                      <span className="text-[10px] text-emerald-800 font-semibold block">(+) Depósitos Tránsito</span>
-                      <span className="font-mono font-bold text-emerald-700 text-sm">
-                        +{currency === 'VES' ? 'Bs.' : '$'} {proofOfCash.depositsInTransit.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
-                      </span>
+                    {/* Quick RegTech Status Card */}
+                    <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs space-y-4">
+                      <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wide border-b border-slate-100 pb-2">
+                        Blindaje RegTech Venezuela
+                      </h3>
+
+                      <div className="space-y-3 text-xs">
+                        <div className="flex items-center justify-between p-2.5 rounded-xl bg-teal-50/70 border border-teal-200/80">
+                          <div>
+                            <span className="font-bold text-teal-950 block">SENIAT Prov. 2025/000054</span>
+                            <span className="text-[11px] text-teal-800">Retenciones IVA 75%/100%</span>
+                          </div>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 border border-teal-200">
+                            Vigente
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between p-2.5 rounded-xl bg-rose-50/70 border border-rose-200/80">
+                          <div>
+                            <span className="font-bold text-rose-950 block">SUDEBAN Res. 010.25</span>
+                            <span className="text-[11px] text-rose-800">Enfoque Basado en Riesgo</span>
+                          </div>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
+                            Auditado
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between p-2.5 rounded-xl bg-amber-50/70 border border-amber-200/80">
+                          <div>
+                            <span className="font-bold text-amber-950 block">Ley Pensiones 2024</span>
+                            <span className="text-[11px] text-amber-800">Alícuota 9% Nómina Bruta</span>
+                          </div>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                            Calculado
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          setActiveModule('SENIAT_TAX');
+                          setActivePage(2);
+                        }}
+                        className="w-full py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold cursor-pointer transition-colors"
+                      >
+                        Abrir Módulo Fiscal SENIAT →
+                      </button>
                     </div>
 
-                    <div className="p-3 rounded-xl bg-rose-50/60 border border-rose-100">
-                      <span className="text-[10px] text-rose-800 font-semibold block">(-) Cheques Pendientes</span>
-                      <span className="font-mono font-bold text-rose-700 text-sm">
-                        -{currency === 'VES' ? 'Bs.' : '$'} {proofOfCash.outstandingChecks.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-sky-50/70 border border-sky-100">
-                      <span className="text-[10px] text-sky-800 font-semibold block">(=) Saldo Conciliado</span>
-                      <span className="font-mono font-bold text-sky-900 text-sm">
-                        {currency === 'VES' ? 'Bs.' : '$'} {proofOfCash.reconciledBank.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-slate-50 text-xs text-slate-600 flex items-center justify-between">
-                    <span>Mayor General de Libros: <strong>{currency === 'VES' ? 'Bs.' : '$'} {proofOfCash.finalBalanceLedger.toLocaleString('es-VE', { minimumFractionDigits: 2 })}</strong></span>
-                    <span className="font-mono text-emerald-700 font-bold">
-                      {proofOfCash.isBalanced ? '✓ Prueba de Caja Cuadrada al 100%' : `Variación: ${currency === 'VES' ? 'Bs.' : '$'} ${proofOfCash.difference.toFixed(2)}`}
-                    </span>
+                  {/* Direct access to reconciliation workspace */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900">
+                          Mesa de Trabajo de Conciliación Bancaria Activa
+                        </h3>
+                        <p className="text-xs text-slate-500">
+                          Visualización simultánea de extractos y asientos contables.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setActiveModule('RECONCILIATION')}
+                        className="text-xs font-bold text-emerald-700 hover:underline cursor-pointer"
+                      >
+                        Ver en Pantalla Completa →
+                      </button>
+                    </div>
+
+                    <ReconciliationWorkspace
+                      transactions={transactions}
+                      currency={currency}
+                      bcvRate={company.bcvRate}
+                      company={company}
+                      initialBalanceBank={initialBalanceBank}
+                      initialBalanceLedger={initialBalanceLedger}
+                      onUpdateInitialBalances={handleUpdateInitialBalances}
+                      onUpdateTransactions={setTransactions}
+                      onSelectTransactionForModule={handleSelectTransactionForModule}
+                      onNavigateToAssistant={handleNavigateToAssistant}
+                      onAddParsedTransactions={handleAddParsedTransactions}
+                      onNavigateToResults={() => setActiveModule('RECONCILIATION_RESULTS')}
+                      onOpenExportModal={() => setIsExportModalOpen(true)}
+                      onOpenRestoreModal={() => setIsRestoreModalOpen(true)}
+                      onOpenHealthCheckup={() => setIsHealthCheckupModalOpen(true)}
+                      onOpenEncryptedBackup={() => setIsEncryptedBackupModalOpen(true)}
+                      onClearReconciliation={handleClearReconciliation}
+                      onSaveTransaction={handleSaveTransaction}
+                      onDeleteTransaction={handleDeleteTransaction}
+                    />
                   </div>
                 </div>
-
-                {/* Quick RegTech Status Card */}
-                <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs space-y-4">
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wide border-b border-slate-100 pb-2">
-                    Blindaje RegTech Venezuela
-                  </h3>
-
-                  <div className="space-y-3 text-xs">
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-teal-50/70 border border-teal-200/80">
-                      <div>
-                        <span className="font-bold text-teal-950 block">SENIAT Prov. 2025/000054</span>
-                        <span className="text-[11px] text-teal-800">Retenciones IVA 75%/100%</span>
-                      </div>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 border border-teal-200">
-                        Vigente
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-rose-50/70 border border-rose-200/80">
-                      <div>
-                        <span className="font-bold text-rose-950 block">SUDEBAN Res. 010.25</span>
-                        <span className="text-[11px] text-rose-800">Enfoque Basado en Riesgo</span>
-                      </div>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
-                        Auditado
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-amber-50/70 border border-amber-200/80">
-                      <div>
-                        <span className="font-bold text-amber-950 block">Ley Pensiones 2024</span>
-                        <span className="text-[11px] text-amber-800">Alícuota 9% Nómina Bruta</span>
-                      </div>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
-                        Calculado
-                      </span>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      setActiveModule('SENIAT_TAX');
-                      setActivePage(2);
-                    }}
-                    className="w-full py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold cursor-pointer transition-colors"
-                  >
-                    Abrir Módulo Fiscal SENIAT →
-                  </button>
-                </div>
-
-              </div>
-
-              {/* Direct access to reconciliation workspace */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900">
-                      Mesa de Trabajo de Conciliación Bancaria Activa
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      Visualización simultánea de extractos y asientos contables.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setActiveModule('RECONCILIATION')}
-                    className="text-xs font-bold text-emerald-700 hover:underline cursor-pointer"
-                  >
-                    Ver en Pantalla Completa →
-                  </button>
-                </div>
-
-                <ReconciliationWorkspace
-                  transactions={transactions}
-                  currency={currency}
-                  bcvRate={company.bcvRate}
-                  company={company}
-                  initialBalanceBank={initialBalanceBank}
-                  initialBalanceLedger={initialBalanceLedger}
-                  onUpdateInitialBalances={handleUpdateInitialBalances}
-                  onUpdateTransactions={setTransactions}
-                  onSelectTransactionForModule={handleSelectTransactionForModule}
-                  onNavigateToAssistant={handleNavigateToAssistant}
-                  onAddParsedTransactions={handleAddParsedTransactions}
-                  onNavigateToResults={() => setActiveModule('RECONCILIATION_RESULTS')}
-                  onOpenExportModal={() => setIsExportModalOpen(true)}
-                  onOpenRestoreModal={() => setIsRestoreModalOpen(true)}
-                  onOpenHealthCheckup={() => setIsHealthCheckupModalOpen(true)}
-                  onOpenEncryptedBackup={() => setIsEncryptedBackupModalOpen(true)}
-                  onClearReconciliation={handleClearReconciliation}
-                  onSaveTransaction={handleSaveTransaction}
-                  onDeleteTransaction={handleDeleteTransaction}
-                />
-              </div>
+              )}
 
             </div>
           )}
@@ -1692,6 +1798,24 @@ export default function App() {
         onStartUpload={(source) => handleOpenUploadFromRoadmap(source, 'PASTE')}
         onNavigateToWorkspace={() => setActiveModule('RECONCILIATION')}
         onNavigateToResults={() => setActiveModule('RECONCILIATION_RESULTS')}
+      />
+
+      <InteractiveTourOverlay
+        isOpen={isTourOverlayOpen}
+        onClose={() => setIsTourOverlayOpen(false)}
+        onOpenUploadModal={handleOpenUploadFromRoadmap}
+        onRunReconciliation={handleRunReconciliationFromRoadmap}
+        onNavigateToWorkspace={() => setActiveModule('RECONCILIATION')}
+        onOpenExportModal={() => setIsExportModalOpen(true)}
+      />
+
+      <ClearReconciliationModal
+        isOpen={isClearModalOpen}
+        onClose={() => setIsClearModalOpen(false)}
+        transactions={transactions}
+        selectedBank={selectedBankAccountId}
+        currency={currency}
+        onConfirmClear={handleClearReconciliation}
       />
 
     </div>

@@ -3,14 +3,17 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChang
 import { getFirestore, doc, getDocFromServer, collection, getDocs, setDoc, updateDoc, deleteDoc, query, where, onSnapshot } from 'firebase/firestore';
 import rawAppletConfig from '../../firebase-applet-config.json';
 
+const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || rawAppletConfig?.projectId || 'ai-studio-8e50d3b3-47bc-4226-b17c-67741752ed3c';
+const databaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || rawAppletConfig?.firestoreDatabaseId || 'ai-studio-8e50d3b3-47bc-4226-b17c-67741752ed3c';
+
 const activeConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || rawAppletConfig.apiKey || '',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || rawAppletConfig.authDomain || '',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || rawAppletConfig.projectId || '',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || rawAppletConfig.storageBucket || '',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || rawAppletConfig.messagingSenderId || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || rawAppletConfig.appId || '',
-  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_DATABASE_ID || rawAppletConfig.firestoreDatabaseId || 'ai-studio-8e50d3b3-47bc-4226-b17c-67741752ed3c',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || rawAppletConfig?.apiKey || 'AIzaSyDummyApiKeyForStudioPreviewEnvironmentOnly12345',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || rawAppletConfig?.authDomain || `${projectId}.firebaseapp.com`,
+  projectId: projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || rawAppletConfig?.storageBucket || `${projectId}.appspot.com`,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || rawAppletConfig?.messagingSenderId || '257746239607',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || rawAppletConfig?.appId || '1:257746239607:web:8e50d3b347bc4226b17c67',
+  firestoreDatabaseId: databaseId,
 };
 
 const app = initializeApp(activeConfig);

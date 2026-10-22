@@ -18,7 +18,12 @@ import {
   ShieldCheck,
   HeartPulse,
   Lock,
-  HelpCircle
+  HelpCircle,
+  Loader2,
+  X,
+  Sparkles,
+  AlertTriangle,
+  Trash2
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { CompanyProfile, CompanyBankAccount, CurrencyType } from '../types/accounting';
@@ -37,10 +42,13 @@ interface NavbarProps {
   onCurrencyToggle: (curr: CurrencyType) => void;
   onOpenSettings: () => void;
   onOpenExportModal: () => void;
+  onOpenClearModal?: () => void;
   onOpenRestoreModal?: () => void;
   onOpenHealthCheckup?: () => void;
   onOpenEncryptedBackup?: () => void;
   onOpenOnboarding?: () => void;
+  onLoginAsLocalUser?: (email: string, displayName: string) => void;
+  onLogoutUser?: () => void;
   healthIssuesCount?: number;
   onUpdateBcvRate: (newRate: number) => void;
   onNavigateToClarify?: () => void;
@@ -64,10 +72,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   onCurrencyToggle,
   onOpenSettings,
   onOpenExportModal,
+  onOpenClearModal,
   onOpenRestoreModal,
   onOpenHealthCheckup,
   onOpenEncryptedBackup,
   onOpenOnboarding,
+  onLoginAsLocalUser,
+  onLogoutUser,
   healthIssuesCount = 0,
   onUpdateBcvRate,
   onNavigateToClarify,
@@ -91,6 +102,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [tempBcv, setTempBcv] = useState(activeCompany.bcvRate.toString());
   const [isFetchingBcv, setIsFetchingBcv] = useState(false);
 
+  // Auth Modal & Fallback States
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [customEmail, setCustomEmail] = useState('omarrperezc@gmail.com');
+  const [customName, setCustomName] = useState('Omar Pérez (Contador CPC)');
+
   const handleFetchLiveBcv = async () => {
     setIsFetchingBcv(true);
     const res = await fetchLiveBcvRate();
@@ -107,12 +125,52 @@ export const Navbar: React.FC<NavbarProps> = ({
     }
   };
 
-  const handleAuth = async () => {
+  const handleAuthClick = async () => {
     if (user) {
-      await logoutUser();
+      try {
+        if (onLogoutUser) {
+          await onLogoutUser();
+        } else {
+          await logoutUser();
+        }
+      } catch (e) {
+        console.warn('Logout error:', e);
+      }
     } else {
-      await loginWithGoogle();
+      setIsAuthModalOpen(true);
+      setAuthError(null);
     }
+  };
+
+  const handleGoogleLoginDirect = async () => {
+    setIsLoggingIn(true);
+    setAuthError(null);
+    try {
+      await loginWithGoogle();
+      setIsAuthModalOpen(false);
+    } catch (err: any) {
+      console.warn('Google Sign-In Error:', err);
+      const msg = err?.message || String(err);
+      if (msg.includes('popup-blocked')) {
+        setAuthError('El navegador bloqueó la ventana emergente de Google. Puedes usar el ingreso rápido a continuación.');
+      } else if (msg.includes('popup-closed-by-user')) {
+        setAuthError('La ventana de Google fue cerrada antes de seleccionar la cuenta.');
+      } else {
+        setAuthError('No se pudo conectar directamente con Google en esta ventana. Utiliza el Ingreso Rápido de Contador a continuación.');
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleQuickLocalLogin = (emailToUse?: string, nameToUse?: string) => {
+    const email = emailToUse || customEmail || 'omarrperezc@gmail.com';
+    const name = nameToUse || customName || 'Omar Pérez (Contador CPC)';
+    if (onLoginAsLocalUser) {
+      onLoginAsLocalUser(email, name);
+    }
+    setIsAuthModalOpen(false);
+    setAuthError(null);
   };
 
   return (
@@ -407,11 +465,23 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               onClick={onOpenExportModal}
               title="Exportar Cédula y Asientos a SGT Contable, Profit Plus, Gálac, Saint o Valery"
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-50 text-sky-900 border border-sky-200/80 text-xs font-bold hover:bg-sky-100 transition-colors cursor-pointer"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-50 text-sky-900 border border-sky-200/80 text-xs font-bold hover:bg-sky-100 transition-colors cursor-pointer shadow-2xs"
             >
               <Download className="w-3.5 h-3.5 text-sky-700" />
               <span className="hidden lg:inline">Exportar ERP</span>
             </button>
+
+            {/* Botón Limpiar Conciliación Rápido */}
+            {onOpenClearModal && (
+              <button
+                onClick={onOpenClearModal}
+                title="Limpiar movimientos cargados y reiniciar la conciliación para volver a vaciar información desde cero"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 text-rose-800 border border-rose-200/90 text-xs font-black hover:bg-rose-100 transition-colors cursor-pointer shadow-2xs"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span>Limpiar Todo</span>
+              </button>
+            )}
 
             {/* Snapshots / Puntos de Restauración */}
             {onOpenRestoreModal && (
@@ -480,9 +550,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Sliders className="w-4 h-4" />
             </button>
 
-            {/* Autenticación Google */}
+            {/* Autenticación Google & Perfil de Usuario */}
             <button
-              onClick={handleAuth}
+              onClick={handleAuthClick}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 user
                   ? 'bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 hover:border-rose-200'
@@ -496,7 +566,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   ) : (
                     <UserIcon className="w-3.5 h-3.5" />
                   )}
-                  <span className="hidden md:inline truncate max-w-[90px]">
+                  <span className="hidden md:inline truncate max-w-[120px]">
                     {user.displayName || user.email?.split('@')[0]}
                   </span>
                   <LogOut className="w-3.5 h-3.5 text-slate-400 group-hover:text-rose-600" />
@@ -513,6 +583,121 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         </div>
       </div>
+
+      {/* Modal Interactivo de Inicio de Sesión */}
+      {isAuthModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-5 text-slate-800">
+            
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold shadow-2xs">
+                  <UserIcon className="w-5 h-5 text-emerald-700" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                    Acceso de Contador / Auditor
+                  </span>
+                  <h3 className="text-base font-extrabold text-slate-900 mt-0.5">
+                    Iniciar Sesión en NOMINUS
+                  </h3>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setIsAuthModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Error Message Box */}
+            {authError && (
+              <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <span className="font-bold block">Aviso de conexión de Google:</span>
+                  <p className="text-[11px] leading-relaxed">{authError}</p>
+                </div>
+              </div>
+            )}
+
+            {/* OPCCIÓN A: Google Sign-In Directo */}
+            <div className="space-y-2">
+              <span className="text-xs font-bold text-slate-700 block">Opción 1: Conexión Directa con Google</span>
+              <button
+                onClick={handleGoogleLoginDirect}
+                disabled={isLoggingIn}
+                className="w-full py-3 px-4 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-2.5 disabled:opacity-50"
+              >
+                {isLoggingIn ? (
+                  <>
+                    <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
+                    <span>Conectando con Google...</span>
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="w-4 h-4 text-emerald-400" />
+                    <span>Continuar con Google Auth Popup</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="relative flex items-center justify-center my-2">
+              <div className="border-t border-slate-200 w-full" />
+              <span className="bg-white px-3 text-[10px] uppercase font-bold text-slate-400 tracking-wider absolute">
+                o acceso de prueba
+              </span>
+            </div>
+
+            {/* OPCCIÓN B: Ingreso Rápido de Contador */}
+            <div className="space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-emerald-600" />
+                <span>Opción 2: Ingreso Rápido de Contador (1 Clic)</span>
+              </span>
+
+              <button
+                onClick={() => handleQuickLocalLogin('omarrperezc@gmail.com', 'Omar Pérez (Contador CPC)')}
+                className="w-full py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer flex items-center justify-between"
+              >
+                <div className="text-left">
+                  <span className="block font-bold">Omar Pérez (Contador CPC)</span>
+                  <span className="text-[10px] text-emerald-100 font-mono">omarrperezc@gmail.com</span>
+                </div>
+                <Check className="w-4 h-4 text-white" />
+              </button>
+
+              <div className="pt-2 border-t border-slate-200/80 space-y-2 text-xs">
+                <span className="text-[11px] font-bold text-slate-700 block">Personalizar otro correo / usuario:</span>
+                <input
+                  type="email"
+                  placeholder="Tu correo de empresa o contador"
+                  value={customEmail}
+                  onChange={(e) => setCustomEmail(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-xl border border-slate-300 bg-white font-mono text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+                <input
+                  type="text"
+                  placeholder="Tu nombre completo / Titular"
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-xl border border-slate-300 bg-white text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+                <button
+                  onClick={() => handleQuickLocalLogin()}
+                  className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs transition-colors cursor-pointer"
+                >
+                  Ingresar con este Perfil
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
     </header>
   );
 };

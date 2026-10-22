@@ -412,7 +412,7 @@ export const TransactionEditorModal: React.FC<TransactionEditorModalProps> = ({
             />
           </div>
 
-          {/* RIF de Contraparte & Código Contable */}
+          {/* RIF de Contraparte & Código Contable Ven-NIF */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-bold text-slate-700 block mb-1">
@@ -429,14 +429,38 @@ export const TransactionEditorModal: React.FC<TransactionEditorModalProps> = ({
 
             <div>
               <label className="text-xs font-bold text-slate-700 block mb-1">
-                Cuenta Ven-NIF (Opcional):
+                Código / Cuenta Contable Ven-NIF:
               </label>
+              <select
+                value={accountCode ? `${accountCode} - ${accountName}` : ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val) {
+                    const [code, ...nameParts] = val.split(' - ');
+                    setAccountCode(code.trim());
+                    setAccountName(nameParts.join(' - ').trim());
+                    setMatchingStatus('MATCHED_EXACT');
+                  }
+                }}
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:border-slate-400 font-medium text-slate-900 mb-1"
+              >
+                <option value="">-- Seleccionar Código Contable --</option>
+                <option value="5.2.01.03.001 - Gastos y Comisiones Bancarias">5.2.01.03.001 - Gastos y Comisiones Bancarias</option>
+                <option value="5.2.03.01.002 - Impuesto IGTF 3%">5.2.03.01.002 - Impuesto IGTF 3%</option>
+                <option value="1.1.02.01.001 - Retención IVA por Cobrar (75%/100%)">1.1.02.01.001 - Retención IVA por Cobrar (75%/100%)</option>
+                <option value="2.1.01.01.001 - Proveedores Nacionales">2.1.01.01.001 - Proveedores Nacionales</option>
+                <option value="1.1.03.01.001 - Cuentas por Cobrar Socios / Directores">1.1.03.01.001 - Cuentas por Cobrar Socios / Directores</option>
+                <option value="4.1.01.01.001 - Ingresos por Ventas / Punto de Venta">4.1.01.01.001 - Ingresos por Ventas / Punto de Venta</option>
+                <option value="5.1.01.01.001 - Gastos de Nómina y Sueldos">5.1.01.01.001 - Gastos de Nómina y Sueldos</option>
+                <option value="1.1.01.02.001 - Transferencia Entre Cuentas Propias">1.1.01.02.001 - Transferencia Entre Cuentas Propias</option>
+                <option value="5.2.01.01.001 - Gastos Generales y Suministros">5.2.01.01.001 - Gastos Generales y Suministros</option>
+              </select>
               <input
                 type="text"
-                placeholder="ej. 1.1.01.02.001 Bancos"
+                placeholder="o escribe la cuenta contable manualmente..."
                 value={accountName}
                 onChange={(e) => setAccountName(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:border-slate-400 font-medium"
+                className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:border-slate-400 font-medium"
               />
             </div>
           </div>

@@ -88,8 +88,46 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
 }) => {
   const [selectedBank, setSelectedBank] = useState<string>('ALL'); // Default to ALL or auto-detected bank
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [typeFilter, setTypeFilter] = useState<'ALL' | 'DEBIT' | 'CREDIT'>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [toleranceDays, setToleranceDays] = useState<number>(3);
+
+  // Helper de Búsqueda Global por descripción, referencia, RIF, fecha o monto
+  const matchesSearchTerm = (tx: BankTransaction, term: string): boolean => {
+    if (!term.trim()) return true;
+    const cleanTerm = term.toLowerCase().trim();
+
+    // 1. Campos de texto (referencia, descripción, RIF, nombre contraparte, cuenta, notas, fecha)
+    if (
+      tx.referenceNum.toLowerCase().includes(cleanTerm) ||
+      tx.rawDescription.toLowerCase().includes(cleanTerm) ||
+      (tx.counterpartyRif && tx.counterpartyRif.toLowerCase().includes(cleanTerm)) ||
+      (tx.counterpartyName && tx.counterpartyName.toLowerCase().includes(cleanTerm)) ||
+      (tx.accountName && tx.accountName.toLowerCase().includes(cleanTerm)) ||
+      (tx.notes && tx.notes.toLowerCase().includes(cleanTerm)) ||
+      (tx.txDate && tx.txDate.includes(cleanTerm))
+    ) {
+      return true;
+    }
+
+    // 2. Búsqueda por Monto (Nominal, VES o USD)
+    const numericSearch = cleanTerm.replace(/[^0-9.,]/g, '').replace(',', '.');
+    if (numericSearch && !isNaN(parseFloat(numericSearch))) {
+      const searchVal = parseFloat(numericSearch);
+      if (
+        Math.abs(tx.amountNominal - searchVal) < 0.01 ||
+        Math.abs(tx.amountVes - searchVal) < 0.01 ||
+        (tx.amountUsdEquivalent && Math.abs(tx.amountUsdEquivalent - searchVal) < 0.01) ||
+        tx.amountNominal.toString().includes(cleanTerm) ||
+        tx.amountVes.toString().includes(cleanTerm) ||
+        tx.amountNominal.toLocaleString('es-VE').includes(cleanTerm)
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  };
 
   // Auditoría automática de salud de datos
   const healthIssuesCount = useMemo(() => {
@@ -314,40 +352,26 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
     if (t.source !== 'BANK') return false;
     if (t.currency !== currency) return false;
     if (selectedBank !== 'ALL' && t.bankCode !== selectedBank) return false;
+    if (typeFilter !== 'ALL' && t.txType !== typeFilter) return false;
     if (statusFilter === 'NO_CUADRAN') {
       if (t.matchingStatus !== 'UNMATCHED' && t.matchingStatus !== 'DISCREPANCY') return false;
     } else if (statusFilter !== 'ALL' && t.matchingStatus !== statusFilter) {
       return false;
     }
-    if (searchTerm) {
-      const matchTerm = searchTerm.toLowerCase();
-      return (
-        t.referenceNum.toLowerCase().includes(matchTerm) ||
-        t.rawDescription.toLowerCase().includes(matchTerm) ||
-        (t.counterpartyRif && t.counterpartyRif.toLowerCase().includes(matchTerm))
-      );
-    }
-    return true;
+    return matchesSearchTerm(t, searchTerm);
   });
 
   const ledgerTxList = transactions.filter(t => {
     if (t.source !== 'LEDGER') return false;
     if (t.currency !== currency) return false;
     if (selectedBank !== 'ALL' && t.bankCode !== selectedBank) return false;
+    if (typeFilter !== 'ALL' && t.txType !== typeFilter) return false;
     if (statusFilter === 'NO_CUADRAN') {
       if (t.matchingStatus !== 'UNMATCHED' && t.matchingStatus !== 'DISCREPANCY') return false;
     } else if (statusFilter !== 'ALL' && t.matchingStatus !== statusFilter) {
       return false;
     }
-    if (searchTerm) {
-      const matchTerm = searchTerm.toLowerCase();
-      return (
-        t.referenceNum.toLowerCase().includes(matchTerm) ||
-        t.rawDescription.toLowerCase().includes(matchTerm) ||
-        (t.counterpartyRif && t.counterpartyRif.toLowerCase().includes(matchTerm))
-      );
-    }
-    return true;
+    return matchesSearchTerm(t, searchTerm);
   });
 
   // Run 5-stage automated matching via Web Worker / non-blocking chunking
@@ -774,58 +798,152 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
 
         </div>
 
-        {/* Filter bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
-          <div className="flex items-center gap-2 flex-1 max-w-md">
-            <div className="relative w-full">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        {/* Global Search & Filter Bar */}
+        <div className="pt-3 border-t border-slate-100 space-y-2.5">
+          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+            
+            {/* Main Search Input */}
+            <div className="relative flex-1 min-w-[280px]">
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="Buscar por referencia, RIF (ej. J-12345678), o concepto..."
+                placeholder="🔍 Buscar por descripción, referencia, RIF o monto (ej. 72.800,00)..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:border-slate-400"
+                className="w-full pl-10 pr-9 py-2 text-xs font-medium rounded-xl border border-slate-200 bg-slate-50/80 focus:bg-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 transition-all shadow-2xs"
               />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 bg-slate-200 hover:bg-slate-300 rounded-full p-0.5 cursor-pointer transition-colors"
+                  title="Limpiar búsqueda"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
+
+            {/* Type Filter (All / Debit / Credit) & Status Filter Pills */}
+            <div className="flex items-center gap-2 flex-wrap text-xs">
+              
+              {/* Type Filter */}
+              <div className="flex items-center rounded-xl bg-slate-100 p-0.5 border border-slate-200 text-xs font-semibold">
+                <button
+                  onClick={() => setTypeFilter('ALL')}
+                  className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                    typeFilter === 'ALL'
+                      ? 'bg-white text-slate-900 shadow-2xs font-bold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Todas
+                </button>
+                <button
+                  onClick={() => setTypeFilter('DEBIT')}
+                  className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                    typeFilter === 'DEBIT'
+                      ? 'bg-rose-600 text-white font-bold shadow-2xs'
+                      : 'text-rose-700 hover:text-rose-900'
+                  }`}
+                >
+                  Cargos (-)
+                </button>
+                <button
+                  onClick={() => setTypeFilter('CREDIT')}
+                  className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                    typeFilter === 'CREDIT'
+                      ? 'bg-emerald-600 text-white font-bold shadow-2xs'
+                      : 'text-emerald-700 hover:text-emerald-900'
+                  }`}
+                >
+                  Abonos (+)
+                </button>
+              </div>
+
+              {/* Status Filter Pills */}
+              <div className="flex items-center gap-1 overflow-x-auto py-0.5 max-w-full">
+                {[
+                  { id: 'ALL', label: 'Todos' },
+                  { id: 'NO_CUADRAN', label: `⚠️ No Cuadran (${unreconciledCount})`, isAlert: true },
+                  { id: 'UNMATCHED', label: 'Pendientes' },
+                  { id: 'DISCREPANCY', label: `Variaciones (${discrepancyCount})` },
+                  { id: 'MATCHED_EXACT', label: 'Exactos' },
+                  { id: 'MATCHED_FUZZY', label: 'Fuzzy' }
+                ].map(f => (
+                  <button
+                    key={f.id}
+                    onClick={() => setStatusFilter(f.id)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap cursor-pointer transition-colors ${
+                      statusFilter === f.id
+                        ? f.isAlert
+                          ? 'bg-rose-700 text-white font-bold ring-2 ring-rose-400 shadow-2xs'
+                          : 'bg-slate-800 text-white font-semibold'
+                        : f.isAlert && unreconciledCount > 0
+                        ? 'bg-rose-50 text-rose-800 border border-rose-300 hover:bg-rose-100 font-bold'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+            </div>
+
           </div>
 
-          <div className="flex items-center gap-1.5 text-xs flex-wrap">
-            <span className="text-slate-500 font-medium">Filtrar:</span>
-            {[
-              { id: 'ALL', label: 'Todos' },
-              { id: 'NO_CUADRAN', label: `⚠️ No Cuadran (${unreconciledCount})`, isAlert: true },
-              { id: 'UNMATCHED', label: 'Pendientes' },
-              { id: 'DISCREPANCY', label: `Variaciones (${discrepancyCount})` },
-              { id: 'MATCHED_EXACT', label: 'Exactos' },
-              { id: 'MATCHED_FUZZY', label: 'Fuzzy' }
-            ].map(f => (
+          {/* Active Search & Filters Indicator Badge */}
+          {(searchTerm || typeFilter !== 'ALL' || statusFilter !== 'ALL') && (
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-2.5 rounded-xl bg-slate-100/90 border border-slate-200/90 text-xs gap-2 animate-in fade-in">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Filter className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span className="font-semibold text-slate-700">
+                  Filtros activos:
+                </span>
+                {searchTerm && (
+                  <span className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded-md font-mono font-bold border border-emerald-300">
+                    "{searchTerm}"
+                  </span>
+                )}
+                {typeFilter !== 'ALL' && (
+                  <span className="bg-sky-100 text-sky-900 px-2 py-0.5 rounded-md font-bold border border-sky-300">
+                    Tipo: {typeFilter === 'DEBIT' ? 'Cargos (-)' : 'Abonos (+)'}
+                  </span>
+                )}
+                {statusFilter !== 'ALL' && (
+                  <span className="bg-purple-100 text-purple-900 px-2 py-0.5 rounded-md font-bold border border-purple-300">
+                    Estado: {statusFilter}
+                  </span>
+                )}
+                <span className="text-slate-600 font-medium ml-1">
+                  • Encontrados: <strong className="text-slate-900">{bankTxList.length}</strong> en Banco / <strong className="text-slate-900">{ledgerTxList.length}</strong> en Libros
+                </span>
+              </div>
+
               <button
-                key={f.id}
-                onClick={() => setStatusFilter(f.id)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
-                  statusFilter === f.id
-                    ? f.isAlert
-                      ? 'bg-rose-700 text-white font-bold ring-2 ring-rose-400'
-                      : 'bg-slate-800 text-white font-semibold'
-                    : f.isAlert && unreconciledCount > 0
-                    ? 'bg-rose-50 text-rose-800 border border-rose-300 hover:bg-rose-100 font-bold'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
+                onClick={() => {
+                  setSearchTerm('');
+                  setTypeFilter('ALL');
+                  setStatusFilter('ALL');
+                }}
+                className="text-[11px] text-slate-600 hover:text-slate-900 font-bold underline cursor-pointer shrink-0"
               >
-                {f.label}
+                Limpiar Filtros
               </button>
-            ))}
-          </div>
+            </div>
+          )}
 
           {/* Manual pair button */}
           {selectedBankId && selectedLedgerId && (
-            <button
-              onClick={handleManualPair}
-              className="flex items-center gap-1 px-3 py-1 rounded-xl bg-purple-600 text-white font-bold text-xs hover:bg-purple-700 shadow-xs cursor-pointer animate-pulse"
-            >
-              <GitCompare className="w-3.5 h-3.5" />
-              Vincular Partidas Seleccionadas
-            </button>
+            <div className="flex justify-end pt-1">
+              <button
+                onClick={handleManualPair}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-purple-600 text-white font-bold text-xs hover:bg-purple-700 shadow-xs cursor-pointer animate-pulse"
+              >
+                <GitCompare className="w-3.5 h-3.5" />
+                Vincular Partidas Seleccionadas
+              </button>
+            </div>
           )}
         </div>
 
