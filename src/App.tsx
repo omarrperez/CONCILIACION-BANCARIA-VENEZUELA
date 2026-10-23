@@ -64,6 +64,8 @@ import { NominusDatabasePayload } from './services/encryptedBackupService';
 import { ClearReconciliationModal, ClearReconciliationOption } from './components/ClearReconciliationModal';
 import { OnboardingModal } from './components/OnboardingModal';
 import { InteractiveTourOverlay } from './components/InteractiveTourOverlay';
+import { ReconciliationStatusWidget } from './components/ReconciliationStatusWidget';
+import { generateSuggestedAdjustments, applyAdjustmentProposals } from './services/adjustmentEngine';
 import {
   loadLocalTransactions,
   saveLocalTransactions,
@@ -430,9 +432,79 @@ export default function App() {
     }
   };
 
+  const [roadmapActiveStep, setRoadmapActiveStep] = useState<number | undefined>(undefined);
+
   const handleUpdateInitialBalances = (bVal: number, lVal: number) => {
     setInitialBalanceBank(bVal);
     setInitialBalanceLedger(lVal);
+  };
+
+
+  // Auto-cuadre instantáneo desde el Widget de Estado de Conciliación
+  const handleAutoBalanceFromWidget = () => {
+    // 1. Probar propuestas de ajustes inteligentes (comisiones, IGTF, etc.)
+    const proposals = generateSuggestedAdjustments(transactions, undefined, currency, company.bcvRate);
+    if (proposals.length > 0) {
+      const result = applyAdjustmentProposals(transactions, proposals);
+      setTransactions(result.updatedTransactions);
+      if (initialBalanceLedger === 0 && initialBalanceBank !== 0) {
+        handleUpdateInitialBalances(initialBalanceBank, initialBalanceBank);
+      }
+      return;
+    }
+
+    // 2. Si quedan partidas del extracto sin asentar en libros, generar sus asientos contables equivalentes
+    const unrecordedBankItems = transactions.filter(
+      t => t.source === 'BANK' && t.currency === currency && t.matchingStatus === 'UNMATCHED'
+    );
+    if (unrecordedBankItems.length > 0) {
+      const newLedgerItems: BankTransaction[] = [];
+      const updatedTx = transactions.map(t => {
+        if (t.source === 'BANK' && t.currency === currency && t.matchingStatus === 'UNMATCHED') {
+          const ledgerId = `led-auto-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+          const isDebit = t.txType === 'DEBIT';
+          const newLedger: BankTransaction = {
+            id: ledgerId,
+            source: 'LEDGER',
+            bankCode: t.bankCode,
+            bankName: t.bankName,
+            referenceNum: t.referenceNum,
+            txDate: t.txDate,
+            txType: t.txType,
+            amountNominal: t.amountNominal,
+            currency: t.currency,
+            bcvRate: t.bcvRate,
+            amountVes: t.amountVes,
+            rawDescription: `[Ajuste Contable] ${t.rawDescription}`,
+            matchingStatus: 'MATCHED_EXACT',
+            matchedWithId: t.id,
+            accountCode: isDebit ? '5.2.01.03.001' : '4.1.01.01.001',
+            accountName: isDebit ? 'Gastos y Comisiones Bancarias' : 'Ingresos Operacionales',
+            createdAt: new Date().toISOString()
+          };
+          newLedgerItems.push(newLedger);
+          return {
+            ...t,
+            matchingStatus: 'MATCHED_EXACT' as const,
+            matchedWithId: ledgerId,
+            autoReconciledBy: 'MANUAL' as const
+          };
+        }
+        return t;
+      });
+
+      if (initialBalanceLedger === 0 && initialBalanceBank !== 0) {
+        handleUpdateInitialBalances(initialBalanceBank, initialBalanceBank);
+      }
+
+      setTransactions([...updatedTx, ...newLedgerItems]);
+      return;
+    }
+
+    // 3. Si solo hay variación en saldo inicial
+    if (!proofOfCash.isBalanced && initialBalanceBank !== 0) {
+      handleUpdateInitialBalances(initialBalanceBank, initialBalanceBank);
+    }
   };
 
   const handleRestoreComplete = (
@@ -1124,27 +1196,47 @@ export default function App() {
                 </div>
               )}
 
-              {/* PÁGINA 1: Flujo Guiado Paso a Paso (Paso 1, 2, 3, 4, 5 con bordes de colores) */}
-              <ReconciliationProcessRoadmap
+              {/* WIDGET CRÍTICO: Estado de la Conciliación (3 datos clave: partidas pendientes, total diferencia monetaria y cuadratura de caja) */}
+              <ReconciliationStatusWidget
                 transactions={transactions}
                 currency={currency}
-                bcvRate={company.bcvRate}
-                company={company}
-                initialBalanceBank={initialBalanceBank}
-                initialBalanceLedger={initialBalanceLedger}
                 proofOfCash={proofOfCash}
-                onOpenUploadModal={handleOpenUploadFromRoadmap}
-                onNavigateToWorkspace={() => setActiveModule('RECONCILIATION')}
-                onNavigateToResults={() => setActiveModule('RECONCILIATION_RESULTS')}
+                onNavigateToStep={(step) => {
+                  setRoadmapActiveStep(step);
+                  const el = document.getElementById('reconciliation-roadmap-wizard');
+                  if (el) el.scrollIntoView({ behavior: 'smooth' });
+                }}
+                onAutoBalance={handleAutoBalanceFromWidget}
                 onOpenProofModal={() => setIsProofModalOpen(true)}
                 onOpenExportModal={() => setIsExportModalOpen(true)}
-                onOpenAdjustments={() => setActiveModule('AI_ASSISTANT')}
-                onRunReconciliation={handleRunReconciliationFromRoadmap}
-                onUpdateInitialBalances={handleUpdateInitialBalances}
-                onOpenRestoreModal={() => setIsRestoreModalOpen(true)}
-                onOpenTourOverlay={() => setIsTourOverlayOpen(true)}
-                onOpenClearModal={() => setIsClearModalOpen(true)}
               />
+
+              {/* PÁGINA 1: Flujo Guiado Paso a Paso (Paso 1, 2, 3, 4, 5 con bordes de colores) */}
+              <div id="reconciliation-roadmap-wizard">
+                <ReconciliationProcessRoadmap
+                  activeStep={roadmapActiveStep}
+                  onSelectStep={(step) => setRoadmapActiveStep(step)}
+                  transactions={transactions}
+                  currency={currency}
+                  bcvRate={company.bcvRate}
+                  company={company}
+                  initialBalanceBank={initialBalanceBank}
+                  initialBalanceLedger={initialBalanceLedger}
+                  proofOfCash={proofOfCash}
+                  onOpenUploadModal={handleOpenUploadFromRoadmap}
+                  onNavigateToWorkspace={() => setActiveModule('RECONCILIATION')}
+                  onNavigateToResults={() => setActiveModule('RECONCILIATION_RESULTS')}
+                  onOpenProofModal={() => setIsProofModalOpen(true)}
+                  onOpenExportModal={() => setIsExportModalOpen(true)}
+                  onOpenAdjustments={() => setActiveModule('AI_ASSISTANT')}
+                  onRunReconciliation={handleRunReconciliationFromRoadmap}
+                  onUpdateInitialBalances={handleUpdateInitialBalances}
+                  onUpdateTransactions={setTransactions}
+                  onOpenRestoreModal={() => setIsRestoreModalOpen(true)}
+                  onOpenTourOverlay={() => setIsTourOverlayOpen(true)}
+                  onOpenClearModal={() => setIsClearModalOpen(true)}
+                />
+              </div>
 
               {/* Toggle Banner for showing full workspace / cards on Home page */}
               {!showFullWorkspaceOnHome ? (

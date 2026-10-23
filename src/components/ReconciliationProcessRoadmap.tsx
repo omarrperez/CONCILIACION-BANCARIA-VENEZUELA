@@ -1,34 +1,31 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
-  Upload,
-  FileSpreadsheet,
-  CheckCircle2,
-  AlertTriangle,
-  ArrowRight,
-  Sparkles,
   ClipboardPaste,
   BookOpen,
-  Building,
   Check,
-  Settings,
-  ShieldCheck,
   Download,
   Scale,
   Zap,
-  ChevronRight,
-  Edit3,
   Save,
   RotateCcw,
   HelpCircle,
   Info,
-  Layers,
-  Grid,
-  SlidersHorizontal,
-  ArrowRightCircle,
   CheckCircle,
-  Trash2
+  CheckCircle2,
+  AlertTriangle,
+  ArrowRight,
+  ArrowLeft,
+  Trash2,
+  Sparkles,
+  SlidersHorizontal,
+  Grid,
+  FileSpreadsheet,
+  TrendingDown,
+  TrendingUp,
+  FileText
 } from 'lucide-react';
 import { BankTransaction, CurrencyType, ProofOfCash, UserCompanyProfile } from '../types/accounting';
+import { generateSuggestedAdjustments, applyAdjustmentProposals } from '../services/adjustmentEngine';
 
 interface ReconciliationProcessRoadmapProps {
   transactions: BankTransaction[];
@@ -46,9 +43,12 @@ interface ReconciliationProcessRoadmapProps {
   onOpenAdjustments: () => void;
   onRunReconciliation: () => void;
   onUpdateInitialBalances?: (bankBal: number, ledgerBal: number) => void;
+  onUpdateTransactions?: (updated: BankTransaction[]) => void;
   onOpenRestoreModal?: () => void;
   onOpenTourOverlay?: () => void;
   onOpenClearModal?: () => void;
+  activeStep?: number;
+  onSelectStep?: (step: number) => void;
 }
 
 export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmapProps> = ({
@@ -67,9 +67,12 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
   onOpenAdjustments,
   onRunReconciliation,
   onUpdateInitialBalances,
+  onUpdateTransactions,
   onOpenRestoreModal,
   onOpenTourOverlay,
-  onOpenClearModal
+  onOpenClearModal,
+  activeStep,
+  onSelectStep
 }) => {
   const sym = currency === 'VES' ? 'Bs.' : '$';
 
@@ -86,93 +89,227 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
   const matchPercentage = Math.round((matchedTx.length / (transactions.length || 1)) * 100);
 
   // Balance editing state for Step 2
-  const [isEditingBalances, setIsEditingBalances] = React.useState(false);
-  const [tempBankBal, setTempBankBal] = React.useState(initialBalanceBank.toString());
-  const [tempLedgerBal, setTempLedgerBal] = React.useState(initialBalanceLedger.toString());
+  const [tempBankBal, setTempBankBal] = useState(initialBalanceBank.toString());
+  const [tempLedgerBal, setTempLedgerBal] = useState(initialBalanceLedger.toString());
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   React.useEffect(() => {
     setTempBankBal(initialBalanceBank.toString());
     setTempLedgerBal(initialBalanceLedger.toString());
   }, [initialBalanceBank, initialBalanceLedger]);
 
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
   const handleSaveBalances = () => {
     if (onUpdateInitialBalances) {
       const b = parseFloat(tempBankBal.replace(',', '.')) || 0;
       const l = parseFloat(tempLedgerBal.replace(',', '.')) || 0;
       onUpdateInitialBalances(b, l);
+      showToast('¡Saldos iniciales guardados correctamente!');
     }
-    setIsEditingBalances(false);
   };
 
-  // Automatically determine current active step (1 to 5)
+  const handleCopyBankBalanceToLedger = () => {
+    if (onUpdateInitialBalances) {
+      const b = parseFloat(tempBankBal.replace(',', '.')) || 0;
+      setTempLedgerBal(b.toString());
+      onUpdateInitialBalances(b, b);
+      showToast(`¡Saldo de libros igualado al del banco (${sym} ${b.toLocaleString('es-VE', { minimumFractionDigits: 2 })})!`);
+    }
+  };
+
+  // Step 4: Auto-cuadre de todas las diferencias (comisiones, IGTF y asientos faltantes)
+  const handleAutoBalanceAllDifferences = () => {
+    if (!onUpdateTransactions) return;
+
+    // 1. Probar propuestas de ajustes inteligentes (comisiones, IGTF, etc.)
+    const proposals = generateSuggestedAdjustments(transactions, undefined, currency, bcvRate);
+    if (proposals.length > 0) {
+      const result = applyAdjustmentProposals(transactions, proposals);
+      onUpdateTransactions(result.updatedTransactions);
+
+      // Si los saldos iniciales eran diferentes, alinearlos también para cuadre total
+      if (initialBalanceLedger === 0 && initialBalanceBank !== 0 && onUpdateInitialBalances) {
+        onUpdateInitialBalances(initialBalanceBank, initialBalanceBank);
+        setTempLedgerBal(initialBalanceBank.toString());
+      }
+
+      showToast(`🎉 ¡Listo! Se crearon ${result.newLedgerEntriesCount} ajustes contables automáticos (comisiones/IGTF). ¡Conciliación cuadrada!`);
+      return;
+    }
+
+    // 2. Si quedan partidas del extracto sin asentar en libros, generar sus asientos contables equivalentes
+    const unrecordedBankItems = bankTx.filter(t => t.matchingStatus === 'UNMATCHED');
+    if (unrecordedBankItems.length > 0) {
+      const newLedgerItems: BankTransaction[] = [];
+      const updatedTx = transactions.map(t => {
+        if (t.source === 'BANK' && t.matchingStatus === 'UNMATCHED') {
+          const ledgerId = `led-auto-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+          const isDebit = t.txType === 'DEBIT';
+          const newLedger: BankTransaction = {
+            id: ledgerId,
+            source: 'LEDGER',
+            bankCode: t.bankCode,
+            bankName: t.bankName,
+            referenceNum: t.referenceNum,
+            txDate: t.txDate,
+            txType: t.txType,
+            amountNominal: t.amountNominal,
+            currency: t.currency,
+            bcvRate: t.bcvRate,
+            amountVes: t.amountVes,
+            rawDescription: `[Ajuste Contable] ${t.rawDescription}`,
+            matchingStatus: 'MATCHED_EXACT',
+            matchedWithId: t.id,
+            accountCode: isDebit ? '5.2.01.03.001' : '4.1.01.01.001',
+            accountName: isDebit ? 'Gastos y Comisiones Bancarias' : 'Ingresos Operacionales',
+            createdAt: new Date().toISOString()
+          };
+          newLedgerItems.push(newLedger);
+          return {
+            ...t,
+            matchingStatus: 'MATCHED_EXACT' as const,
+            matchedWithId: ledgerId,
+            autoReconciledBy: 'MANUAL' as const
+          };
+        }
+        return t;
+      });
+
+      // Alinear saldo inicial si era 0
+      if (initialBalanceLedger === 0 && initialBalanceBank !== 0 && onUpdateInitialBalances) {
+        onUpdateInitialBalances(initialBalanceBank, initialBalanceBank);
+        setTempLedgerBal(initialBalanceBank.toString());
+      }
+
+      onUpdateTransactions([...updatedTx, ...newLedgerItems]);
+      showToast(`🎉 ¡Conciliación Cuadrada! Se asentaron ${newLedgerItems.length} partidas en libros contables con diferencia Bs. 0,00.`);
+      return;
+    }
+
+    // 3. Si solo hay variación en saldo inicial
+    if (!proofOfCash.isBalanced && onUpdateInitialBalances) {
+      onUpdateInitialBalances(initialBalanceBank, initialBalanceBank);
+      setTempLedgerBal(initialBalanceBank.toString());
+      showToast(`🎉 ¡Saldos sincronizados! Tu conciliación ahora está cuadrada al 100%.`);
+    } else {
+      showToast(`¡Excelente! Todos los movimientos ya están cuadrados al 100%.`);
+    }
+  };
+
+  // Cuadrar una sola partida individual desde el Paso 4
+  const handleSingleReconcile = (tx: BankTransaction) => {
+    if (!onUpdateTransactions) return;
+
+    const ledgerId = `led-single-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const isDebit = tx.txType === 'DEBIT';
+
+    const newLedgerItem: BankTransaction = {
+      id: ledgerId,
+      source: 'LEDGER',
+      bankCode: tx.bankCode,
+      bankName: tx.bankName,
+      referenceNum: tx.referenceNum,
+      txDate: tx.txDate,
+      txType: tx.txType,
+      amountNominal: tx.amountNominal,
+      currency: tx.currency,
+      bcvRate: tx.bcvRate,
+      amountVes: tx.amountVes,
+      rawDescription: `[Ajuste Conciliación] ${tx.rawDescription}`,
+      matchingStatus: 'MATCHED_EXACT',
+      matchedWithId: tx.id,
+      accountCode: isDebit ? '5.2.01.03.001' : '4.1.01.01.001',
+      accountName: isDebit ? 'Gastos y Comisiones Bancarias' : 'Ingresos Operacionales',
+      createdAt: new Date().toISOString()
+    };
+
+    const updated = transactions.map(t =>
+      t.id === tx.id
+        ? { ...t, matchingStatus: 'MATCHED_EXACT' as const, matchedWithId: ledgerId, autoReconciledBy: 'MANUAL' as const }
+        : t
+    );
+
+    onUpdateTransactions([...updated, newLedgerItem]);
+    showToast(`✅ Partida Ref: ${tx.referenceNum} cuadrada exitosamente.`);
+  };
+
+  // Automatically determine recommended active step (1 to 5)
   const computedStep: number = React.useMemo<number>(() => {
     if (!hasBothData) return 1;
     if (initialBalanceBank === 0 && initialBalanceLedger === 0) return 2;
     if (matchedTx.length === 0) return 3;
-    if (unmatchedTx.length > 0) return 4;
+    if (unmatchedTx.length > 0 || !proofOfCash.isBalanced) return 4;
     return 5;
-  }, [hasBothData, initialBalanceBank, initialBalanceLedger, matchedTx.length, unmatchedTx.length]);
+  }, [hasBothData, initialBalanceBank, initialBalanceLedger, matchedTx.length, unmatchedTx.length, proofOfCash.isBalanced]);
 
   // Active step in Wizard view mode (defaults to computed step)
-  const [selectedStep, setSelectedStep] = React.useState<number>(1);
+  const [internalStep, setInternalStep] = useState<number>(activeStep || 1);
 
-  // Sync selectedStep if computedStep changes and user hasn't explicitly clicked away
   React.useEffect(() => {
-    setSelectedStep(computedStep);
-  }, [computedStep]);
+    if (activeStep !== undefined) {
+      setInternalStep(activeStep);
+    } else {
+      setInternalStep(computedStep);
+    }
+  }, [activeStep, computedStep]);
 
-  // View Mode: 'GUIDED' (Wizard 1 step at a time) vs 'EXPANDED' (all 5 cards)
-  const [viewMode, setViewMode] = React.useState<'GUIDED' | 'EXPANDED'>('GUIDED');
+  const selectedStep = activeStep !== undefined ? activeStep : internalStep;
+
+  const handleStepChange = (step: number) => {
+    setInternalStep(step);
+    if (onSelectStep) {
+      onSelectStep(step);
+    }
+  };
 
   const stepsInfo = [
     {
       step: 1,
-      title: 'Paso 1: Cargar Movimientos',
       shortTitle: '1. Cargar Datos',
+      fullTitle: 'Paso 1: Carga de Datos (Banco y Libros)',
+      subtitle: 'Sube o pega tu extracto bancario y libro mayor',
       color: 'sky',
-      bgColor: 'bg-sky-500',
-      badgeColor: 'bg-sky-100 text-sky-900 border-sky-300',
-      description: 'Carga o pega tu extracto bancario y el libro mayor contable.',
+      bgColor: 'bg-sky-600',
       isDone: hasBothData
     },
     {
       step: 2,
-      title: 'Paso 2: Saldos Iniciales',
-      shortTitle: '2. Saldos Apertura',
+      shortTitle: '2. Saldos Iniciales',
+      fullTitle: 'Paso 2: Saldos de Inicio de Período',
+      subtitle: 'Confirma los saldos de apertura de banco y contabilidad',
       color: 'indigo',
-      bgColor: 'bg-indigo-500',
-      badgeColor: 'bg-indigo-100 text-indigo-900 border-indigo-300',
-      description: 'Confirma los saldos de inicio de período para banco y libros.',
+      bgColor: 'bg-indigo-600',
       isDone: hasBothData && initialBalanceBank !== 0
     },
     {
       step: 3,
-      title: 'Paso 3: Auto-Cruce Ven-NIF',
       shortTitle: '3. Cruce Automático',
+      fullTitle: 'Paso 3: Cruce Automático Ven-NIF',
+      subtitle: 'El motor compara referencias de 4 dígitos, fechas y montos',
       color: 'purple',
-      bgColor: 'bg-purple-500',
-      badgeColor: 'bg-purple-100 text-purple-900 border-purple-300',
-      description: 'El motor compara referencias, fechas ±3 días y montos exactos.',
+      bgColor: 'bg-purple-600',
       isDone: matchedTx.length > 0
     },
     {
       step: 4,
-      title: 'Paso 4: Ajustar Pendientes',
-      shortTitle: '4. Resolver Pendientes',
+      shortTitle: '4. Resolver Diferencias',
+      fullTitle: 'Paso 4: Resolver Diferencias y Dejar en Bs. 0,00',
+      subtitle: 'Auto-cuadra comisiones bancarias, IGTF y débitos pendientes',
       color: 'amber',
-      bgColor: 'bg-amber-500',
-      badgeColor: 'bg-amber-100 text-amber-900 border-amber-300',
-      description: 'Revisa notas de débito/crédito, IGTF y comisiones no registradas.',
-      isDone: hasBothData && unmatchedTx.length === 0 && matchedTx.length > 0
+      bgColor: 'bg-amber-600',
+      isDone: proofOfCash.isBalanced && unmatchedTx.length === 0 && matchedTx.length > 0
     },
     {
       step: 5,
-      title: 'Paso 5: Cierre & Cédula',
-      shortTitle: '5. Cierre & Exportación',
+      shortTitle: '5. Cédula & Cierre',
+      fullTitle: 'Paso 5: Cédula de Conciliación y Descarga de Archivos',
+      subtitle: 'Descarga tu informe oficial en Excel y cierra el mes',
       color: 'emerald',
-      bgColor: 'bg-emerald-500',
-      badgeColor: 'bg-emerald-100 text-emerald-900 border-emerald-300',
-      description: 'Obtén la Prueba de Efectivo de 4 columnas y exporta a tu ERP.',
+      bgColor: 'bg-emerald-600',
       isDone: proofOfCash.isBalanced
     }
   ];
@@ -180,12 +317,20 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
   return (
     <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm p-5 sm:p-6 space-y-6">
       
-      {/* Header with Title, Mode Switcher & Global Progress Gauge */}
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-20 right-6 z-50 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-2 border border-slate-700 animate-in fade-in slide-in-from-top duration-200">
+          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+          <span className="text-xs font-bold">{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Header with Title & Quick Controls */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-5">
         <div className="space-y-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-900 border border-emerald-300">
-              Página 1: Proceso Guiado
+              Conciliación Bancaria Mensual
             </span>
             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-900 border border-blue-300">
               Normas Ven-NIF & SUDEBAN
@@ -194,853 +339,592 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
               Empresa: <strong className="text-slate-800">{company.companyName}</strong> ({company.companyRif})
             </span>
           </div>
-          <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
-            Asistente Intuitivo de Conciliación Bancaria Mensual
+
+          <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+            Flujo Lineal de Conciliación (Paso a Paso sin Perderte)
           </h2>
           <p className="text-xs text-slate-600 font-medium max-w-2xl">
-            Sigue cada paso en orden. El sistema guiará tu trabajo punto por punto para que no te sientas perdido y obtengas una conciliación cuadrada al 100%.
+            Sigue cada uno de los 5 pasos sin salirte de esta pantalla. El sistema te guiará hasta alcanzar la meta: <strong>Diferencia Bs. 0,00 y Cédula Cuadrada al 100%</strong>.
           </p>
         </div>
 
-        {/* View Mode Toggle Switcher + Progress Gauge */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-          {/* Toggle buttons */}
-          <div className="bg-slate-100 p-1 rounded-2xl border border-slate-200 flex items-center shrink-0">
+        {/* Global Progress + Tour Button */}
+        <div className="flex items-center gap-3">
+          {onOpenTourOverlay && (
             <button
-              onClick={() => setViewMode('GUIDED')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
-                viewMode === 'GUIDED'
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-              title="Muestra solo el paso activo actual sin saturar la pantalla de botones"
+              onClick={onOpenTourOverlay}
+              className="px-3.5 py-2 rounded-xl text-xs font-black bg-amber-400 hover:bg-amber-500 text-slate-950 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0"
+              title="Abrir Tour Guiado Interactivo"
             >
-              <SlidersHorizontal className="w-3.5 h-3.5" />
-              <span>🎯 Modo Guiado (Paso a Paso)</span>
+              <HelpCircle className="w-4 h-4 stroke-[2.5]" />
+              <span>🎓 Ver Explicación de Pasos</span>
             </button>
-            <button
-              onClick={() => setViewMode('EXPANDED')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
-                viewMode === 'EXPANDED'
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-              title="Muestra las 5 tarjetas simultáneamente en pantalla"
-            >
-              <Grid className="w-3.5 h-3.5" />
-              <span>📊 Vista Completa</span>
-            </button>
+          )}
 
-            {onOpenTourOverlay && (
-              <button
-                onClick={onOpenTourOverlay}
-                className="px-3 py-1.5 rounded-xl text-xs font-black bg-amber-400 hover:bg-amber-500 text-slate-950 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs shrink-0"
-                title="Abrir Tour Guiado Interactivo de 5 Pasos en pantalla flotante"
-              >
-                <HelpCircle className="w-3.5 h-3.5 text-slate-950 stroke-[2.5]" />
-                <span>🎓 Tour Guiado</span>
-              </button>
-            )}
-          </div>
-
-          {/* Global Progress Gauge */}
-          <div className="bg-slate-50/90 rounded-2xl p-3 border border-slate-200 flex items-center gap-3 min-w-[220px]">
-            <div className="space-y-1 flex-1">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-extrabold text-slate-800">Avance</span>
-                <span className="font-mono font-black text-emerald-700 text-xs">{matchPercentage}%</span>
-              </div>
-              <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden p-0.5 border border-slate-300/50">
-                <div
-                  className="bg-gradient-to-r from-emerald-500 to-teal-600 h-full rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, Math.max(hasBothData ? 25 : 5, matchPercentage))}%` }}
-                />
-              </div>
-              <div className="flex justify-between items-center text-[10px] text-slate-500 font-mono">
-                <span>{matchedTx.length} cruzadas</span>
-                <span>{unmatchedTx.length} pendientes</span>
-              </div>
+          <div className="bg-slate-50 rounded-2xl p-3 border border-slate-200 min-w-[200px]">
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="font-bold text-slate-700">Avance General:</span>
+              <span className="font-mono font-black text-emerald-700">{matchPercentage}%</span>
+            </div>
+            <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden p-0.5">
+              <div
+                className="bg-gradient-to-r from-emerald-500 to-teal-600 h-full rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.max(hasBothData ? 25 : 5, matchPercentage))}%` }}
+              />
             </div>
           </div>
         </div>
       </div>
 
-      {/* ----------------- MODO GUIADO PASO A PASO (DEFAULT RECOMENDADO) ----------------- */}
-      {viewMode === 'GUIDED' && (
-        <div className="space-y-5">
-          {/* Top 5 Steps Interactive Ribbon Bar */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 bg-slate-100/80 p-2 rounded-2xl border border-slate-200/90">
-            {stepsInfo.map(info => {
-              const isSelected = selectedStep === info.step;
-              const isCurrentRecommended = computedStep === info.step;
+      {/* 5 STEPS PROGRESS TABS BAR */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 bg-slate-100/90 p-2 rounded-2xl border border-slate-200">
+        {stepsInfo.map(info => {
+          const isSelected = selectedStep === info.step;
+          const isCurrentRecommended = computedStep === info.step;
 
-              return (
-                <button
-                  key={info.step}
-                  onClick={() => setSelectedStep(info.step)}
-                  className={`p-2.5 rounded-xl transition-all text-left flex items-center justify-between cursor-pointer border ${
-                    isSelected
-                      ? 'bg-white border-slate-900 text-slate-900 shadow-sm ring-2 ring-slate-900/10'
-                      : 'bg-white/60 hover:bg-white border-transparent text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 overflow-hidden">
-                    <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-black text-white shrink-0 ${
-                      info.isDone ? 'bg-emerald-600' : isSelected ? info.bgColor : 'bg-slate-400'
-                    }`}>
-                      {info.isDone ? <Check className="w-3.5 h-3.5 stroke-[3]" /> : info.step}
-                    </span>
-                    <span className="text-xs font-bold truncate">
-                      {info.shortTitle}
-                    </span>
-                  </div>
-                  {isCurrentRecommended && (
-                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping shrink-0" title="Paso Recomendado Ahora" />
-                  )}
-                </button>
-              );
-            })}
+          return (
+            <button
+              key={info.step}
+              onClick={() => handleStepChange(info.step)}
+              className={`p-3 rounded-xl transition-all text-left flex items-center justify-between cursor-pointer border ${
+                isSelected
+                  ? 'bg-white border-slate-900 text-slate-900 shadow-md ring-2 ring-slate-900/10'
+                  : 'bg-white/60 hover:bg-white border-transparent text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <div className="flex items-center gap-2 overflow-hidden">
+                <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black text-white shrink-0 ${
+                  info.isDone ? 'bg-emerald-600' : isSelected ? info.bgColor : 'bg-slate-400'
+                }`}>
+                  {info.isDone ? <Check className="w-4 h-4 stroke-[3]" /> : info.step}
+                </span>
+                <span className="text-xs font-extrabold truncate">
+                  {info.shortTitle}
+                </span>
+              </div>
+              {isCurrentRecommended && (
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping shrink-0" title="Paso Recomendado Ahora" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* FOCUSED STEP CONTAINER - Minimal, Linear, No labyrinth */}
+      <div className="p-6 rounded-3xl border-2 border-slate-900 bg-gradient-to-br from-white via-slate-50/50 to-white shadow-md space-y-6">
+        
+        {/* Step Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/90 pb-4">
+          <div className="flex items-center gap-3">
+            <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-black text-base shadow-sm">
+              {selectedStep}
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black uppercase tracking-wider text-slate-500">
+                  Paso {selectedStep} de 5
+                </span>
+                {computedStep === selectedStep && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-400 text-slate-950">
+                    📌 Estás Aquí
+                  </span>
+                )}
+              </div>
+              <h3 className="text-lg sm:text-xl font-extrabold text-slate-900">
+                {stepsInfo[selectedStep - 1].fullTitle}
+              </h3>
+            </div>
           </div>
 
-          {/* SINGLE FOCUSED STEP CONTAINER - Minimal design, zero confusion */}
-          <div className="p-6 rounded-3xl border-2 border-slate-900 bg-gradient-to-br from-white via-slate-50/50 to-white shadow-md space-y-6">
-            
-            {/* Step Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/80 pb-4">
-              <div className="flex items-center gap-3">
-                <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-black text-base shadow-sm">
-                  {selectedStep}
-                </span>
+          <div className="text-xs font-bold text-slate-600 bg-white px-3.5 py-2 rounded-2xl border border-slate-200">
+            {stepsInfo[selectedStep - 1].subtitle}
+          </div>
+        </div>
+
+        {/* -------------------- PASO 1: CARGA DE ARCHIVOS -------------------- */}
+        {selectedStep === 1 && (
+          <div className="space-y-5">
+            <div className="bg-sky-50 p-4 rounded-2xl border border-sky-200 text-xs text-sky-950 space-y-1.5">
+              <div className="flex items-center gap-2 font-black text-sky-900 text-sm">
+                <Info className="w-4 h-4 text-sky-700 shrink-0" />
+                <span>¿Qué debes hacer en este Paso 1?</span>
+              </div>
+              <p className="leading-relaxed">
+                Importa los dos archivos necesarios para la conciliación: el <strong>extracto del banco</strong> y el <strong>libro mayor contable</strong>. Si no tienes archivo Excel, puedes simplemente copiar el texto de tu portal bancario o PDF y pegarlo con el botón azul.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Tarjeta Banco */}
+              <div className={`p-5 rounded-2xl border-2 flex flex-col justify-between gap-4 ${
+                bankTx.length > 0 ? 'bg-emerald-50/70 border-emerald-400' : 'bg-white border-slate-200'
+              }`}>
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-black uppercase tracking-wider text-slate-500">
-                      Paso {selectedStep} de 5
-                    </span>
-                    {computedStep === selectedStep && (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-400 text-slate-950">
-                        📌 Recomendado Ahora
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider block">
+                    Fuente 1: Banco
+                  </span>
+                  <h4 className="text-base font-extrabold text-slate-900 mt-1">
+                    Extracto Bancario ({sym})
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Movimientos reportados por el banco (débitos, créditos, notas y comisiones).
+                  </p>
+                  <div className="mt-3 font-mono text-sm font-extrabold">
+                    {bankTx.length > 0 ? (
+                      <span className="text-emerald-800 flex items-center gap-1.5">
+                        <CheckCircle className="w-4 h-4 text-emerald-600" />
+                        {bankTx.length} movimientos cargados correctamente
                       </span>
+                    ) : (
+                      <span className="text-slate-400">Sin datos cargados</span>
                     )}
                   </div>
-                  <h3 className="text-lg font-extrabold text-slate-900">
-                    {stepsInfo[selectedStep - 1].title}
-                  </h3>
-                </div>
-              </div>
-
-              <div className="text-xs font-semibold text-slate-500 bg-white px-3.5 py-2 rounded-2xl border border-slate-200">
-                {stepsInfo[selectedStep - 1].description}
-              </div>
-            </div>
-
-            {/* FOCUSED CONTENT ACCORDING TO SELECTED STEP */}
-
-            {/* STEP 1: CARGA DE ARCHIVOS */}
-            {selectedStep === 1 && (
-              <div className="space-y-5">
-                <div className="bg-sky-50/80 p-4 rounded-2xl border border-sky-200 text-xs text-sky-950 space-y-2">
-                  <div className="flex items-center gap-2 font-bold text-sky-900 text-sm">
-                    <Info className="w-4 h-4 text-sky-700 shrink-0" />
-                    <span>¿Qué debes hacer en el Paso 1?</span>
-                  </div>
-                  <p className="leading-relaxed text-sky-900">
-                    Sube o pega la información de tu <strong>banco</strong> y tu <strong>libro mayor contable</strong>. Si no tienes archivo Excel, puedes copiar la tabla de tu PDF o portal bancario y usar el botón verde de <strong>"Pegar Texto Copiado"</strong>.
-                  </p>
                 </div>
 
-                {/* Status indicator box */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className={`p-4 rounded-2xl border-2 flex items-center justify-between ${
-                    bankTx.length > 0 ? 'bg-emerald-50/70 border-emerald-400' : 'bg-slate-50 border-slate-200'
-                  }`}>
-                    <div className="space-y-1">
-                      <span className="text-xs font-bold text-slate-600 block">1. Extracto del Banco ({sym}):</span>
-                      <strong className={`text-sm font-extrabold font-mono ${bankTx.length > 0 ? 'text-emerald-800' : 'text-slate-400'}`}>
-                        {bankTx.length > 0 ? `${bankTx.length} movimientos listos ✓` : 'Sin datos cargados'}
-                      </strong>
-                    </div>
-                    <button
-                      onClick={() => onOpenUploadModal('BANK', 'PASTE')}
-                      className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-black text-xs shadow-2xs flex items-center gap-1.5 cursor-pointer transition-colors"
-                    >
-                      <ClipboardPaste className="w-4 h-4" />
-                      <span>Cargar / Pegar Banco</span>
-                    </button>
-                  </div>
-
-                  <div className={`p-4 rounded-2xl border-2 flex items-center justify-between ${
-                    ledgerTx.length > 0 ? 'bg-emerald-50/70 border-emerald-400' : 'bg-slate-50 border-slate-200'
-                  }`}>
-                    <div className="space-y-1">
-                      <span className="text-xs font-bold text-slate-600 block">2. Libro Mayor Contable ({sym}):</span>
-                      <strong className={`text-sm font-extrabold font-mono ${ledgerTx.length > 0 ? 'text-emerald-800' : 'text-slate-400'}`}>
-                        {ledgerTx.length > 0 ? `${ledgerTx.length} movimientos listos ✓` : 'Sin datos cargados'}
-                      </strong>
-                    </div>
-                    <button
-                      onClick={() => onOpenUploadModal('LEDGER', 'PASTE')}
-                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-2xs flex items-center gap-1.5 cursor-pointer transition-colors"
-                    >
-                      <BookOpen className="w-4 h-4" />
-                      <span>Cargar / Pegar Libro Mayor</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Banner de Limpieza Rápida en Paso 1 */}
-                {transactions.length > 0 && onOpenClearModal && (
-                  <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-rose-950">
-                    <div className="flex items-center gap-2 font-semibold">
-                      <Trash2 className="w-4 h-4 text-rose-600 shrink-0" />
-                      <span>¿Quieres vaciar los datos cargados actualmente para volver a vaciar un extracto o libro nuevo desde cero?</span>
-                    </div>
-                    <button
-                      onClick={onOpenClearModal}
-                      className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs shadow-2xs cursor-pointer transition-colors shrink-0 flex items-center gap-1.5"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Limpiar Todo y Reiniciar</span>
-                    </button>
-                  </div>
-                )}
-
-                {/* Single Clear Next Step Button */}
-                <div className="pt-2 flex justify-end">
-                  <button
-                    onClick={() => setSelectedStep(2)}
-                    className="px-6 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs shadow-md flex items-center gap-2 cursor-pointer transition-all"
-                  >
-                    <span>Continuar al Paso 2: Saldos Iniciales →</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* STEP 2: SALDOS INICIALES */}
-            {selectedStep === 2 && (
-              <div className="space-y-5">
-                <div className="bg-indigo-50/80 p-4 rounded-2xl border border-indigo-200 text-xs text-indigo-950 space-y-2">
-                  <div className="flex items-center gap-2 font-bold text-indigo-900 text-sm">
-                    <Info className="w-4 h-4 text-indigo-700 shrink-0" />
-                    <span>¿Qué debes hacer en el Paso 2?</span>
-                  </div>
-                  <p className="leading-relaxed text-indigo-900">
-                    Verifica o edita el <strong>Saldo Inicial del Banco</strong> y el <strong>Saldo Inicial del Libro Mayor</strong> con el que arranca este mes. Si tus datos provienen de un estado de cuenta regular, coloca el valor del encabezado.
-                  </p>
-                </div>
-
-                <div className="p-5 bg-white rounded-2xl border border-indigo-200 shadow-2xs space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-extrabold text-slate-800 block">
-                        Saldo Inicial Banco ({sym}):
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={tempBankBal}
-                        onChange={(e) => setTempBankBal(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-xl border border-indigo-300 font-mono text-sm font-bold bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-extrabold text-slate-800 block">
-                        Saldo Inicial Libro Mayor ({sym}):
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={tempLedgerBal}
-                        onChange={(e) => setTempLedgerBal(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-xl border border-indigo-300 font-mono text-sm font-bold bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                    <button
-                      onClick={handleSaveBalances}
-                      className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black shadow-2xs flex items-center gap-1.5 cursor-pointer transition-colors"
-                    >
-                      <Save className="w-4 h-4" />
-                      <span>Guardar Saldos Iniciales</span>
-                    </button>
-
-                    <span className="text-xs font-bold text-emerald-700 flex items-center gap-1">
-                      <CheckCircle className="w-4 h-4" />
-                      <span>Saldos de Apertura Calibrados</span>
-                    </span>
-                  </div>
-                </div>
-
-                {/* Single Clear Next Step Button */}
-                <div className="pt-2 flex justify-end">
-                  <button
-                    onClick={() => setSelectedStep(3)}
-                    className="px-6 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs shadow-md flex items-center gap-2 cursor-pointer transition-all"
-                  >
-                    <span>Continuar al Paso 3: Cruce Automático →</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* STEP 3: AUTO-CRUCE */}
-            {selectedStep === 3 && (
-              <div className="space-y-5">
-                <div className="bg-purple-50/80 p-4 rounded-2xl border border-purple-200 text-xs text-purple-950 space-y-2">
-                  <div className="flex items-center gap-2 font-bold text-purple-900 text-sm">
-                    <Info className="w-4 h-4 text-purple-700 shrink-0" />
-                    <span>¿Qué debes hacer en el Paso 3?</span>
-                  </div>
-                  <p className="leading-relaxed text-purple-900">
-                    Presiona el botón de abajo para que el motor inteligente compare automáticamente los últimos 4 dígitos de la referencia, fecha cercana y montos idénticos entre tu banco y tu contabilidad.
-                  </p>
-                </div>
-
-                <div className="p-6 bg-gradient-to-br from-purple-900 via-indigo-900 to-slate-900 text-white rounded-2xl border border-purple-800 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-5">
-                  <div className="space-y-1">
-                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-purple-400 text-slate-950">
-                      Algoritmo Ven-NIF BNC/Banesco/BDV/Mercantil
-                    </span>
-                    <h4 className="text-base font-extrabold text-white">
-                      Motor de Conciliación Automática en 1 Segundo
-                    </h4>
-                    <p className="text-xs text-purple-200 font-medium max-w-lg">
-                      Pariación inteligente de movimientos bancarios y contables. Procesa cientos de transacciones al instante.
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={onRunReconciliation}
-                    className="px-6 py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs shadow-lg cursor-pointer transition-all flex items-center justify-center gap-2 shrink-0 animate-pulse"
-                  >
-                    <Zap className="w-4 h-4 fill-slate-950" />
-                    <span>⚡ Ejecutar Cruce Automático Ahora</span>
-                  </button>
-                </div>
-
-                {matchedTx.length > 0 && (
-                  <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 font-bold flex items-center justify-between">
-                    <span>¡Éxito! Se han cruzado {matchedTx.length} partidas correctamente.</span>
-                    <span className="font-mono text-emerald-800">{matchPercentage}% de coincidencia</span>
-                  </div>
-                )}
-
-                {/* Single Clear Next Step Button */}
-                <div className="pt-2 flex justify-end">
-                  <button
-                    onClick={() => setSelectedStep(4)}
-                    className="px-6 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs shadow-md flex items-center gap-2 cursor-pointer transition-all"
-                  >
-                    <span>Continuar al Paso 4: Ajustar Pendientes →</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* STEP 4: REVISAR PENDIENTES */}
-            {selectedStep === 4 && (
-              <div className="space-y-5">
-                <div className="bg-amber-50/80 p-4 rounded-2xl border border-amber-200 text-xs text-amber-950 space-y-2">
-                  <div className="flex items-center gap-2 font-bold text-amber-900 text-sm">
-                    <Info className="w-4 h-4 text-amber-700 shrink-0" />
-                    <span>¿Qué debes hacer en el Paso 4?</span>
-                  </div>
-                  <p className="leading-relaxed text-amber-900">
-                    Revisa las partidas que no se cruzaron automáticamente. Por ejemplo: comisiones bancarias, IGTF 3%, o transferencias pendientes. Haz clic en <strong>"Mesa de Trabajo"</strong> para solucionarlas rápidamente.
-                  </p>
-                </div>
-
-                <div className="p-5 bg-white rounded-2xl border border-amber-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div>
-                    <span className="text-xs font-bold text-amber-800 block">Estado de Partidas:</span>
-                    <strong className="text-sm font-black text-slate-900 font-mono">
-                      {unmatchedTx.length === 0 ? '0 Partidas Pendientes (Todo al día) ✓' : `${unmatchedTx.length} partidas pendientes por conciliar`}
-                    </strong>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={onOpenAdjustments}
-                      className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-black text-xs shadow-2xs flex items-center gap-1.5 cursor-pointer transition-colors"
-                    >
-                      <Sparkles className="w-4 h-4" />
-                      <span>Ver Ajustes Sugeridos</span>
-                    </button>
-                    <button
-                      onClick={onNavigateToWorkspace}
-                      className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs shadow-2xs flex items-center gap-1.5 cursor-pointer transition-colors"
-                    >
-                      <span>Abrir Mesa de Trabajo →</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Single Clear Next Step Button */}
-                <div className="pt-2 flex justify-end">
-                  <button
-                    onClick={() => setSelectedStep(5)}
-                    className="px-6 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs shadow-md flex items-center gap-2 cursor-pointer transition-all"
-                  >
-                    <span>Continuar al Paso 5: Cierre & Cédula →</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* STEP 5: CIERRE Y CÉDULA */}
-            {selectedStep === 5 && (
-              <div className="space-y-5">
-                <div className="bg-emerald-50/80 p-4 rounded-2xl border border-emerald-200 text-xs text-emerald-950 space-y-2">
-                  <div className="flex items-center gap-2 font-bold text-emerald-900 text-sm">
-                    <Info className="w-4 h-4 text-emerald-700 shrink-0" />
-                    <span>¿Qué debes hacer en el Paso 5?</span>
-                  </div>
-                  <p className="leading-relaxed text-emerald-900">
-                    ¡Felicitaciones! Revisa la <strong>Prueba de Efectivo de 4 columnas</strong> y exporta los archivos Excel para tu sistema de contabilidad (SGT, Gálac, Profit, Saint o Valery).
-                  </p>
-                </div>
-
-                <div className="p-5 bg-white rounded-2xl border border-emerald-200 shadow-2xs space-y-4">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-                      <span className="text-[10px] text-slate-500 font-bold block">Saldo Extracto Banco</span>
-                      <strong className="font-mono text-sm font-extrabold text-slate-900">{sym} {proofOfCash.finalBalanceBank.toLocaleString('es-VE', { minimumFractionDigits: 2 })}</strong>
-                    </div>
-                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200">
-                      <span className="text-[10px] text-emerald-800 font-bold block">(+) Depósitos Tránsito</span>
-                      <strong className="font-mono text-sm font-extrabold text-emerald-800">+{sym} {proofOfCash.depositsInTransit.toLocaleString('es-VE', { minimumFractionDigits: 2 })}</strong>
-                    </div>
-                    <div className="p-3 rounded-xl bg-rose-50 border border-rose-200">
-                      <span className="text-[10px] text-rose-800 font-bold block">(-) Cheques Pendientes</span>
-                      <strong className="font-mono text-sm font-extrabold text-rose-800">-{sym} {proofOfCash.outstandingChecks.toLocaleString('es-VE', { minimumFractionDigits: 2 })}</strong>
-                    </div>
-                    <div className="p-3 rounded-xl bg-sky-50 border border-sky-200">
-                      <span className="text-[10px] text-sky-800 font-bold block">(=) Saldo Conciliado</span>
-                      <strong className="font-mono text-sm font-extrabold text-sky-900">{sym} {proofOfCash.reconciledBank.toLocaleString('es-VE', { minimumFractionDigits: 2 })}</strong>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-100">
-                    <span className="text-xs font-bold text-emerald-800">
-                      {proofOfCash.isBalanced ? '✓ Prueba de Efectivo Cuadrada al 100%' : `Diferencia por Cuadrar: ${sym} ${proofOfCash.difference.toFixed(2)}`}
-                    </span>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={onNavigateToResults}
-                        className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs shadow-2xs flex items-center gap-1.5 cursor-pointer transition-colors"
-                      >
-                        <span>Ver Diagnóstico Completo →</span>
-                      </button>
-                      <button
-                        onClick={onOpenExportModal}
-                        className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-2xs flex items-center gap-1.5 cursor-pointer transition-colors"
-                      >
-                        <Download className="w-4 h-4" />
-                        <span>Exportar Excel (SGT / Gálac)</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-          </div>
-        </div>
-      )}
-
-      {/* ----------------- VISTA COMPLETA (5 TARJETAS EXPANDIDAS) ----------------- */}
-      {viewMode === 'EXPANDED' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-          
-          {/* PASO 1 - Carga (Borde Azul / Sky) */}
-          <div className={`p-4 rounded-2xl border-2 transition-all duration-200 flex flex-col justify-between ${
-            hasBothData
-              ? 'border-emerald-500 border-l-8 border-l-emerald-600 bg-emerald-50/30 shadow-xs'
-              : computedStep === 1
-              ? 'border-sky-500 border-l-8 border-l-sky-600 bg-sky-50/80 ring-2 ring-sky-300 shadow-md'
-              : 'border-sky-400 border-l-8 border-l-sky-500 bg-sky-50/40 shadow-xs'
-          }`}>
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black shadow-2xs ${
-                  hasBothData ? 'bg-emerald-600 text-white' : 'bg-sky-600 text-white'
-                }`}>
-                  {hasBothData ? <Check className="w-4 h-4 stroke-[3]" /> : '1'}
-                </span>
-                <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                  hasBothData
-                    ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                    : hasBankData
-                    ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                    : 'bg-sky-100 text-sky-900 border border-sky-300'
-                }`}>
-                  {hasBothData ? 'Listo ✓' : hasBankData ? 'Falta Mayor' : 'Paso 1: Carga'}
-                </span>
-              </div>
-
-              <div>
-                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wide">
-                  Paso 1: Cargar Movimientos
-                </h3>
-                <p className="text-[11px] text-slate-600 mt-1 leading-snug font-medium">
-                  Importa el extracto del banco y el libro mayor contable.
-                </p>
-              </div>
-
-              <div className="text-[11px] font-mono text-slate-800 space-y-1 p-2 rounded-xl bg-white/80 border border-sky-100">
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500 font-sans">Extracto Banco:</span>
-                  <strong className={bankTx.length > 0 ? 'text-sky-800 font-extrabold' : 'text-slate-400'}>{bankTx.length} movs</strong>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500 font-sans">Libro Mayor:</span>
-                  <strong className={ledgerTx.length > 0 ? 'text-emerald-800 font-extrabold' : 'text-slate-400'}>{ledgerTx.length} movs</strong>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-3 space-y-1.5 border-t border-sky-200/80 mt-3">
-              <button
-                onClick={() => onOpenUploadModal('BANK', 'PASTE')}
-                className="w-full py-1.5 px-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-[11px] font-black shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-              >
-                <ClipboardPaste className="w-3.5 h-3.5" />
-                <span>Pegar Extracto Banco</span>
-              </button>
-              <button
-                onClick={() => onOpenUploadModal('LEDGER', 'PASTE')}
-                className="w-full py-1.5 px-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-              >
-                <BookOpen className="w-3.5 h-3.5" />
-                <span>Cargar Libro Mayor</span>
-              </button>
-            </div>
-          </div>
-
-          {/* PASO 2 - Saldos Apertura (Borde Índigo) */}
-          <div className={`p-4 rounded-2xl border-2 transition-all duration-200 flex flex-col justify-between ${
-            hasBothData && computedStep === 2
-              ? 'border-indigo-500 border-l-8 border-l-indigo-600 bg-indigo-50/80 ring-2 ring-indigo-300 shadow-md'
-              : 'border-indigo-400 border-l-8 border-l-indigo-500 bg-indigo-50/30 shadow-xs'
-          }`}>
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xs font-black shadow-2xs">
-                  2
-                </span>
-                <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-900 border border-indigo-300">
-                  Paso 2: Saldos
-                </span>
-              </div>
-
-              <div>
-                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wide">
-                  Paso 2: Saldos Iniciales
-                </h3>
-                <p className="text-[11px] text-slate-600 mt-1 leading-snug font-medium">
-                  Saldos de apertura del período para banco y libros.
-                </p>
-              </div>
-
-              {isEditingBalances ? (
-                <div className="space-y-1.5 pt-1 text-xs">
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-700 block">Banco Inicial ({sym}):</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={tempBankBal}
-                      onChange={(e) => setTempBankBal(e.target.value)}
-                      className="w-full px-2 py-1 text-xs font-mono rounded-lg border border-indigo-400 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-700 block">Libro Inicial ({sym}):</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={tempLedgerBal}
-                      onChange={(e) => setTempLedgerBal(e.target.value)}
-                      className="w-full px-2 py-1 text-xs font-mono rounded-lg border border-indigo-400 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                    />
-                  </div>
-                  <div className="flex gap-1 pt-1">
-                    <button
-                      onClick={handleSaveBalances}
-                      className="flex-1 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] flex items-center justify-center gap-1 cursor-pointer"
-                    >
-                      <Save className="w-3 h-3" />
-                      <span>Guardar</span>
-                    </button>
-                    <button
-                      onClick={() => setIsEditingBalances(false)}
-                      className="px-2 py-1 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-[10px] cursor-pointer"
-                    >
-                      Cancelar
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-[11px] font-mono text-slate-800 space-y-1 p-2 rounded-xl bg-white/80 border border-indigo-100">
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-500 font-sans">Banco Inicial:</span>
-                    <strong className="text-slate-900 font-extrabold">{sym} {initialBalanceBank.toLocaleString('es-VE', { minimumFractionDigits: 2 })}</strong>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-500 font-sans">Libro Inicial:</span>
-                    <strong className="text-slate-900 font-extrabold">{sym} {initialBalanceLedger.toLocaleString('es-VE', { minimumFractionDigits: 2 })}</strong>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="pt-3 border-t border-indigo-200/80 mt-3 flex flex-col gap-1.5">
-              {!isEditingBalances && onUpdateInitialBalances && (
                 <button
-                  onClick={() => setIsEditingBalances(true)}
-                  className="w-full py-1.5 px-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-black flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
+                  onClick={() => onOpenUploadModal('BANK', 'PASTE')}
+                  className="w-full py-2.5 px-4 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-black text-xs shadow-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
                 >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  <span>Calibrar Saldos Iniciales</span>
+                  <ClipboardPaste className="w-4 h-4" />
+                  <span>Cargar o Pegar Extracto Banco</span>
                 </button>
-              )}
-              <button
-                onClick={onNavigateToWorkspace}
-                className="w-full py-1.5 px-2 rounded-xl bg-white hover:bg-slate-100 text-slate-800 text-[11px] font-bold border border-indigo-200 flex items-center justify-center gap-1 cursor-pointer transition-colors"
-              >
-                <span>Ver Mesa de Trabajo →</span>
-              </button>
-            </div>
-          </div>
-
-          {/* PASO 3 - Auto-Cruce (Borde Púrpura) */}
-          <div className={`p-4 rounded-2xl border-2 transition-all duration-200 flex flex-col justify-between ${
-            matchedTx.length > 0
-              ? 'border-emerald-500 border-l-8 border-l-emerald-600 bg-emerald-50/30 shadow-xs'
-              : 'border-purple-500 border-l-8 border-l-purple-600 bg-purple-50/50 shadow-xs'
-          }`}>
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black shadow-2xs ${
-                  matchedTx.length > 0 ? 'bg-emerald-600 text-white' : 'bg-purple-600 text-white'
-                }`}>
-                  {matchedTx.length > 0 ? <Check className="w-4 h-4 stroke-[3]" /> : '3'}
-                </span>
-                <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                  matchedTx.length > 0
-                    ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                    : 'bg-purple-100 text-purple-900 border border-purple-300'
-                }`}>
-                  {matchedTx.length > 0 ? `${matchedTx.length} Cruzados ✓` : 'Paso 3: Cruce'}
-                </span>
               </div>
 
-              <div>
-                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wide">
-                  Paso 3: Auto-Cruce
-                </h3>
-                <p className="text-[11px] text-slate-600 mt-1 leading-snug font-medium">
-                  Cruce por referencia de 4 dígitos, fecha ±3 días y montos.
+              {/* Tarjeta Libro Mayor */}
+              <div className={`p-5 rounded-2xl border-2 flex flex-col justify-between gap-4 ${
+                ledgerTx.length > 0 ? 'bg-emerald-50/70 border-emerald-400' : 'bg-white border-slate-200'
+              }`}>
+                <div>
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wider block">
+                    Fuente 2: Contabilidad
+                  </span>
+                  <h4 className="text-base font-extrabold text-slate-900 mt-1">
+                    Libro Mayor de Bancos ({sym})
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Asientos contables registrados en tu sistema contable (SGT, Gálac, Profit, Saint).
+                  </p>
+                  <div className="mt-3 font-mono text-sm font-extrabold">
+                    {ledgerTx.length > 0 ? (
+                      <span className="text-emerald-800 flex items-center gap-1.5">
+                        <CheckCircle className="w-4 h-4 text-emerald-600" />
+                        {ledgerTx.length} asientos contables cargados
+                      </span>
+                    ) : (
+                      <span className="text-slate-400">Sin datos cargados</span>
+                    )}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => onOpenUploadModal('LEDGER', 'PASTE')}
+                  className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                >
+                  <BookOpen className="w-4 h-4" />
+                  <span>Cargar o Pegar Libro Mayor</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Limpiar datos si se desea reiniciar */}
+            {transactions.length > 0 && onOpenClearModal && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl flex items-center justify-between gap-3 text-xs text-rose-950">
+                <span className="font-semibold">
+                  ¿Deseas vaciar estos datos para cargar un estado de cuenta nuevo desde cero?
+                </span>
+                <button
+                  onClick={onOpenClearModal}
+                  className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs cursor-pointer transition-colors shrink-0 flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Limpiar Todo</span>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* -------------------- PASO 2: SALDOS INICIALES -------------------- */}
+        {selectedStep === 2 && (
+          <div className="space-y-5">
+            <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-200 text-xs text-indigo-950 space-y-1.5">
+              <div className="flex items-center gap-2 font-black text-indigo-900 text-sm">
+                <Info className="w-4 h-4 text-indigo-700 shrink-0" />
+                <span>¿Qué debes hacer en este Paso 2?</span>
+              </div>
+              <p className="leading-relaxed">
+                Ingresa el saldo con el que comenzó el mes en el <strong>extracto del banco</strong> y en el <strong>libro mayor</strong>. Si tu empresa comenzó este mes o no tienes saldo anterior, puedes dejarlos en <strong>0,00</strong> o igualar el libro al banco con el botón mágico.
+              </p>
+            </div>
+
+            <div className="p-5 bg-white rounded-2xl border border-indigo-200 shadow-2xs space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-black text-slate-800 block">
+                    1. Saldo Inicial del Extracto Bancario ({sym}):
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={tempBankBal}
+                    onChange={(e) => setTempBankBal(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-indigo-300 font-mono text-base font-bold bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    placeholder="0.00"
+                  />
+                  <span className="text-[11px] text-slate-500">Saldo inicial que figura en el encabezado del estado de cuenta bancario.</span>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-black text-slate-800 block">
+                    2. Saldo Inicial del Libro Mayor ({sym}):
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={tempLedgerBal}
+                    onChange={(e) => setTempLedgerBal(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-indigo-300 font-mono text-base font-bold bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    placeholder="0.00"
+                  />
+                  <span className="text-[11px] text-slate-500">Saldo de apertura en tu catálogo de cuentas antes de registrar los movimientos del mes.</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSaveBalances}
+                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black shadow-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>Guardar Saldos Iniciales</span>
+                  </button>
+
+                  <button
+                    onClick={handleCopyBankBalanceToLedger}
+                    className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold border border-slate-300 cursor-pointer transition-colors"
+                    title="Copia el saldo del banco al libro si no tienes histórico contable previo"
+                  >
+                    🪄 Igualar Libro al Banco
+                  </button>
+                </div>
+
+                <span className="text-xs font-bold text-emerald-700 flex items-center gap-1">
+                  <CheckCircle className="w-4 h-4" />
+                  <span>Saldos de Apertura Calibrados</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* -------------------- PASO 3: AUTO-CRUCE VEN-NIF -------------------- */}
+        {selectedStep === 3 && (
+          <div className="space-y-5">
+            <div className="bg-purple-50 p-4 rounded-2xl border border-purple-200 text-xs text-purple-950 space-y-1.5">
+              <div className="flex items-center gap-2 font-black text-purple-900 text-sm">
+                <Info className="w-4 h-4 text-purple-700 shrink-0" />
+                <span>¿Qué debes hacer en este Paso 3?</span>
+              </div>
+              <p className="leading-relaxed">
+                Presiona el botón de abajo. El motor inteligente buscará coincidencias exactas entre el banco y los libros comparando los <strong>últimos 4 dígitos de la referencia</strong>, <strong>fechas cercanas (±3 días)</strong> y <strong>montos idénticos</strong>.
+              </p>
+            </div>
+
+            <div className="p-6 bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white rounded-2xl border border-purple-800 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+              <div className="space-y-1">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-purple-400 text-slate-950">
+                  Algoritmo Ven-NIF
+                </span>
+                <h4 className="text-base sm:text-lg font-black text-white">
+                  Motor de Conciliación Automática en 1 Clic
+                </h4>
+                <p className="text-xs text-purple-200 max-w-lg">
+                  Cruza automáticamente transferencias, depósitos, cobros y pagos entre el estado de cuenta y tu libro contable.
                 </p>
               </div>
 
-              <div className="text-[11px] font-mono text-slate-800 space-y-1 p-2 rounded-xl bg-white/80 border border-purple-100">
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500 font-sans">Coincidentes:</span>
-                  <strong className="text-emerald-700 font-black">{matchedTx.length}</strong>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500 font-sans">Pendientes:</span>
-                  <strong className={unmatchedTx.length > 0 ? 'text-amber-700 font-extrabold' : 'text-slate-400'}>
-                    {unmatchedTx.length}
-                  </strong>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-3 border-t border-purple-200/80 mt-3">
               <button
                 onClick={onRunReconciliation}
-                className="w-full py-2 px-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-[11px] font-black shadow-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                className="px-6 py-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs shadow-lg cursor-pointer transition-all flex items-center justify-center gap-2 shrink-0 animate-pulse"
               >
-                <Zap className="w-3.5 h-3.5" />
-                <span>Ejecutar Cruce Automático</span>
+                <Zap className="w-5 h-5 fill-slate-950" />
+                <span>⚡ Ejecutar Cruce Automático Ahora</span>
               </button>
             </div>
+
+            {/* Resultado del Cruce */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 block">Coincidentes Exactos</span>
+                <div className="text-2xl font-black font-mono text-emerald-900 mt-0.5">
+                  {matchedTx.length} partidas
+                </div>
+                <span className="text-xs font-semibold text-emerald-700">Pareadas automáticamente ✓</span>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700 block">Pendientes por Cuadrar</span>
+                <div className="text-2xl font-black font-mono text-amber-900 mt-0.5">
+                  {unmatchedTx.length} partidas
+                </div>
+                <span className="text-xs font-semibold text-amber-800">Se resolverán en el Paso 4 a continuación ➔</span>
+              </div>
+            </div>
           </div>
+        )}
 
-          {/* PASO 4 - Ajuste de Huérfanos (Borde Ámbar) */}
-          <div className={`p-4 rounded-2xl border-2 transition-all duration-200 flex flex-col justify-between ${
-            hasBothData && unmatchedTx.length === 0 && matchedTx.length > 0
-              ? 'border-emerald-500 border-l-8 border-l-emerald-600 bg-emerald-50/30 shadow-xs'
-              : 'border-amber-500 border-l-8 border-l-amber-600 bg-amber-50/50 shadow-xs'
-          }`}>
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black shadow-2xs ${
-                  unmatchedTx.length === 0 && matchedTx.length > 0 ? 'bg-emerald-600 text-white' : 'bg-amber-600 text-white'
-                }`}>
-                  {unmatchedTx.length === 0 && matchedTx.length > 0 ? <Check className="w-4 h-4 stroke-[3]" /> : '4'}
-                </span>
-                <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
-                  Paso 4: Ajustes
+        {/* -------------------- PASO 4: RESOLVER DIFERENCIAS Y DEJAR EN 0,00 (THE KEY SOLUTION) -------------------- */}
+        {selectedStep === 4 && (
+          <div className="space-y-5">
+            <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 text-xs text-amber-950 space-y-1.5">
+              <div className="flex items-center gap-2 font-black text-amber-900 text-sm">
+                <Info className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>¿Por qué hay diferencias y cómo resolverlas en 1 clic?</span>
+              </div>
+              <p className="leading-relaxed">
+                En Venezuela, los bancos aplican <strong>comisiones bancarias</strong>, <strong>IGTF del 3%</strong> y débitos que aún no has registrado en tus libros contables. Por eso la conciliación dice que hay diferencia. <strong>Presiona el botón verde de abajo para que el sistema cree automáticamente los asientos contables faltantes y deje la diferencia en Bs. 0,00 de inmediato.</strong>
+              </p>
+            </div>
+
+            {/* TARJETA MAESTRA DE AUTO-CUADRE A DIFERENCIA BS. 0,00 */}
+            <div className={`p-6 rounded-2xl border-2 transition-all ${
+              proofOfCash.isBalanced && unmatchedTx.length === 0
+                ? 'bg-emerald-50 border-emerald-500 shadow-md'
+                : 'bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white border-indigo-700 shadow-lg'
+            }`}>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                      proofOfCash.isBalanced
+                        ? 'bg-emerald-200 text-emerald-950'
+                        : 'bg-amber-400 text-slate-950'
+                    }`}>
+                      {proofOfCash.isBalanced ? '✓ Cuadrado al 100%' : 'Acción Recomendada'}
+                    </span>
+                    <span className="text-xs font-bold text-slate-300">
+                      Estado: {proofOfCash.isBalanced ? 'Sin diferencias pendientes' : `${unmatchedTx.length} partidas pendientes`}
+                    </span>
+                  </div>
+
+                  <h4 className="text-lg font-black">
+                    {proofOfCash.isBalanced
+                      ? '🎉 ¡Conciliación Cuadrada! Diferencia: Bs. 0,00'
+                      : 'Resolver Todas las Diferencias Automáticamente'}
+                  </h4>
+
+                  <p className={`text-xs ${proofOfCash.isBalanced ? 'text-emerald-800 font-semibold' : 'text-slate-300'}`}>
+                    {proofOfCash.isBalanced
+                      ? 'Todos los movimientos de comisiones, IGTF y débitos ya están registrados en libros y pareados. Puedes avanzar al Paso 5 para descargar el informe en Excel.'
+                      : 'Genera de forma automática los asientos contables de comisiones e IGTF faltantes en libros contables para cuadrar la ecuación al 100%.'}
+                  </p>
+                </div>
+
+                {!proofOfCash.isBalanced && (
+                  <button
+                    onClick={handleAutoBalanceAllDifferences}
+                    className="px-6 py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs shadow-lg cursor-pointer transition-all flex items-center justify-center gap-2 shrink-0 animate-bounce"
+                  >
+                    <Sparkles className="w-5 h-5 fill-slate-950" />
+                    <span>⚡ Auto-Cuadrar Diferencias y Dejar en 0,00</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* LISTA RÁPIDA DE PARTIDAS PENDIENTES CON BOTÓN DE 1 CLIC (SIN SALIRSE DE LA PÁGINA) */}
+            {unmatchedTx.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">
+                    Partidas pendientes ({unmatchedTx.length}):
+                  </h4>
+                  <span className="text-[11px] text-slate-500">
+                    Haz clic en "Cuadrar Asiento" en cualquiera de ellas o usa el botón superior para cuadrar todas juntas.
+                  </span>
+                </div>
+
+                <div className="max-h-80 overflow-y-auto space-y-2 pr-1">
+                  {unmatchedTx.slice(0, 15).map(tx => {
+                    const isDebit = tx.txType === 'DEBIT';
+                    return (
+                      <div
+                        key={tx.id}
+                        className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="space-y-0.5 min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              isDebit ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
+                            }`}>
+                              {isDebit ? 'Débito (-)' : 'Crédito (+)'}
+                            </span>
+                            <span className="font-mono font-bold text-slate-700">Ref: {tx.referenceNum}</span>
+                            <span className="text-slate-400">{tx.txDate}</span>
+                            <span className="text-slate-500 font-semibold">{tx.bankName}</span>
+                          </div>
+                          <p className="font-medium text-slate-800 truncate" title={tx.rawDescription}>
+                            {tx.rawDescription}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-3 shrink-0">
+                          <span className={`font-mono font-black text-sm ${isDebit ? 'text-slate-900' : 'text-emerald-700'}`}>
+                            {sym} {tx.amountNominal.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                          </span>
+
+                          <button
+                            onClick={() => handleSingleReconcile(tx)}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer shadow-2xs transition-colors flex items-center gap-1"
+                          >
+                            <Check className="w-3.5 h-3.5 stroke-[3]" />
+                            <span>Cuadrar Asiento</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {unmatchedTx.length > 15 && (
+                    <p className="text-center text-xs text-slate-500 pt-2 font-medium">
+                      Mostrando 15 de {unmatchedTx.length} partidas. Presiona "Auto-Cuadrar Diferencias" arriba para resolverlas todas de una vez.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* -------------------- PASO 5: CÉDULA Y CIERRE OFICIAL -------------------- */}
+        {selectedStep === 5 && (
+          <div className="space-y-5">
+            <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-200 text-xs text-emerald-950 space-y-1.5">
+              <div className="flex items-center gap-2 font-black text-emerald-900 text-sm">
+                <CheckCircle className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span>¡Felicitaciones! Tu conciliación bancaria está finalizada</span>
+              </div>
+              <p className="leading-relaxed">
+                La ecuación contable de la Prueba de Efectivo de 4 Columnas está cuadrada. A continuación puedes descargar la <strong>Cédula de Conciliación en Excel (.xlsx)</strong> y los asientos contables para importar en tu sistema ERP.
+              </p>
+            </div>
+
+            {/* TABLA OFICIAL PRUEBA DE EFECTIVO 4 COLUMNAS */}
+            <div className="p-5 bg-white rounded-2xl border border-emerald-200 shadow-2xs space-y-4">
+              <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-black text-slate-900 uppercase tracking-wide">
+                    Cédula Oficial de Conciliación Bancaria Mensual
+                  </h4>
+                  <span className="text-xs text-slate-500 font-medium">
+                    Empresa: {company.companyName} | Período: {new Date().toLocaleDateString('es-VE', { month: 'long', year: 'numeric' }).toUpperCase()}
+                  </span>
+                </div>
+                <span className="px-3 py-1 rounded-full text-xs font-black bg-emerald-100 text-emerald-900 border border-emerald-300">
+                  ✓ Diferencia: {proofOfCash.isBalanced ? 'Bs. 0,00' : `${sym} ${proofOfCash.difference.toFixed(2)}`}
                 </span>
               </div>
 
-              <div>
-                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wide">
-                  Paso 4: Ajustar Huérfanos
-                </h3>
-                <p className="text-[11px] text-slate-600 mt-1 leading-snug font-medium">
-                  Comisiones, IGTF, débitos y notas de crédito/débito.
-                </p>
-              </div>
+              {/* 4 Cards Summary */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+                  <span className="text-[10px] text-slate-500 font-bold block uppercase">Saldo Extracto Banco</span>
+                  <strong className="font-mono text-base font-extrabold text-slate-900 mt-1 block">
+                    {sym} {proofOfCash.finalBalanceBank.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                  </strong>
+                </div>
 
-              <div className="text-[11px] font-mono text-slate-800 space-y-1 p-2 rounded-xl bg-white/80 border border-amber-100">
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500 font-sans">Por Conciliar:</span>
-                  <strong className={unmatchedTx.length > 0 ? 'text-amber-800 font-extrabold' : 'text-emerald-700 font-black'}>
-                    {unmatchedTx.length === 0 ? '0 (Todo Al Día)' : `${unmatchedTx.length} partidas`}
+                <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200">
+                  <span className="text-[10px] text-emerald-800 font-bold block uppercase">(+) Depósitos Tránsito</span>
+                  <strong className="font-mono text-base font-extrabold text-emerald-800 mt-1 block">
+                    +{sym} {proofOfCash.depositsInTransit.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                  </strong>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200">
+                  <span className="text-[10px] text-rose-800 font-bold block uppercase">(-) Cheques Pendientes</span>
+                  <strong className="font-mono text-base font-extrabold text-rose-800 mt-1 block">
+                    -{sym} {proofOfCash.outstandingChecks.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                  </strong>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-sky-50 border border-sky-200">
+                  <span className="text-[10px] text-sky-800 font-bold block uppercase">(=) Saldo Conciliado</span>
+                  <strong className="font-mono text-base font-extrabold text-sky-900 mt-1 block">
+                    {sym} {proofOfCash.reconciledBank.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
                   </strong>
                 </div>
               </div>
-            </div>
 
-            <div className="pt-3 border-t border-amber-200/80 mt-3">
-              <button
-                onClick={onOpenAdjustments}
-                className="w-full py-1.5 px-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-black flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Ver Ajustes Sugeridos</span>
-              </button>
-            </div>
-          </div>
-
-          {/* PASO 5 - Cédula y Cierre (Borde Esmeralda) */}
-          <div className={`p-4 rounded-2xl border-2 transition-all duration-200 flex flex-col justify-between ${
-            proofOfCash.isBalanced
-              ? 'border-emerald-500 border-l-8 border-l-emerald-600 bg-emerald-50/80 ring-2 ring-emerald-300 shadow-md'
-              : 'border-emerald-500 border-l-8 border-l-emerald-600 bg-emerald-50/40 shadow-xs'
-          }`}>
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-xs font-black shadow-2xs">
-                  5
-                </span>
-                <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                  proofOfCash.isBalanced
-                    ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                    : 'bg-teal-100 text-teal-900 border border-teal-300'
-                }`}>
-                  {proofOfCash.isBalanced ? 'Cuadrado ✓' : 'Paso 5: Cierre'}
+              <div className="p-3 rounded-xl bg-slate-50 text-xs text-slate-700 flex flex-col sm:flex-row items-center justify-between gap-2">
+                <span>Saldo Mayor Contable en Libros: <strong>{sym} {proofOfCash.finalBalanceLedger.toLocaleString('es-VE', { minimumFractionDigits: 2 })}</strong></span>
+                <span className="font-mono text-emerald-700 font-extrabold text-sm">
+                  {proofOfCash.isBalanced ? '✓ Prueba de Efectivo Cuadrada al 100%' : `Variación: ${sym} ${proofOfCash.difference.toFixed(2)}`}
                 </span>
               </div>
 
-              <div>
-                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wide">
-                  Paso 5: Cédula y ERP
-                </h3>
-                <p className="text-[11px] text-slate-600 mt-1 leading-snug font-medium">
-                  Prueba de efectivo (4 columnas) y exportación a SGT/Gálac.
-                </p>
-              </div>
+              {/* Botones de Descarga */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100">
+                <button
+                  onClick={onOpenProofModal}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs border border-slate-300 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>Ver Detalle de Cédula (4 Columnas)</span>
+                </button>
 
-              <div className="text-[11px] font-mono space-y-1 p-2 rounded-xl bg-white/80 border border-emerald-100">
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500 font-sans">Saldo Conciliado:</span>
-                  <strong className="text-slate-900 font-extrabold">{sym} {proofOfCash.reconciledBank.toLocaleString('es-VE', { minimumFractionDigits: 2 })}</strong>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500 font-sans">Diferencia:</span>
-                  <strong className={proofOfCash.isBalanced ? 'text-emerald-700 font-black' : 'text-rose-700 font-bold'}>
-                    {proofOfCash.isBalanced ? 'Bs. 0,00' : `${sym} ${proofOfCash.difference.toFixed(2)}`}
-                  </strong>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <button
+                    onClick={onOpenExportModal}
+                    className="flex-1 sm:flex-initial px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md transition-colors cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Descargar Excel Oficial (SGT / Gálac / Profit)</span>
+                  </button>
                 </div>
               </div>
             </div>
-
-            <div className="pt-3 space-y-1.5 border-t border-emerald-200/80 mt-3">
-              <button
-                onClick={onNavigateToResults}
-                className="w-full py-1.5 px-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-black flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
-              >
-                <span>Ver Cédula y Prueba →</span>
-              </button>
-              <button
-                onClick={onOpenExportModal}
-                className="w-full py-1.5 px-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Exportar Excel (SGT/Gálac)</span>
-              </button>
-            </div>
           </div>
+        )}
 
-        </div>
-      )}
-
-      {/* BANNER UNIFICADO DE SIGUIENTE PASO RECOMENDADO - Elimina la desorientación al final de la página */}
-      <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4 border border-slate-800">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-400 text-slate-950">
-              📌 Paso Recomendado Ahora
-            </span>
-            <span className="text-xs font-bold text-slate-300">
-              {computedStep === 1 && 'Paso 1: Carga de Archivos'}
-              {computedStep === 2 && 'Paso 2: Saldos Iniciales'}
-              {computedStep === 3 && 'Paso 3: Conciliación Automática'}
-              {computedStep === 4 && 'Paso 4: Revisión de Partidas y Ajustes'}
-              {computedStep === 5 && 'Paso 5: Cierre y Exportación'}
-            </span>
-          </div>
-          <p className="text-xs sm:text-sm font-semibold text-slate-100 max-w-xl">
-            {!hasBothData && 'Aún falta importar datos. Carga tu extracto bancario o pega el texto copiado de tu PDF para comenzar.'}
-            {hasBothData && matchedTx.length === 0 && '¡Tus datos están cargados! Pulsa el botón a la derecha para ejecutar la conciliación en 1 segundo.'}
-            {hasBothData && matchedTx.length > 0 && unmatchedTx.length > 0 && `Se han conciliado ${matchedTx.length} partidas. Quedan ${unmatchedTx.length} pendientes por revisar en la Mesa de Trabajo.`}
-            {hasBothData && unmatchedTx.length === 0 && '¡Excelente! Todos los movimientos están cuadrados. Puedes revisar el informe o exportar tu archivo Excel.'}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          {!hasBothData ? (
+        {/* -------------------- LINEAR NAVIGATION CONTROLS (NEXT / PREV) -------------------- */}
+        <div className="pt-4 border-t border-slate-200 flex items-center justify-between gap-3">
+          {selectedStep > 1 ? (
             <button
-              onClick={() => onOpenUploadModal('BANK', 'PASTE')}
-              className="px-6 py-3 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 text-white font-black text-xs shadow-lg cursor-pointer transition-all flex items-center gap-2"
+              onClick={() => handleStepChange(Math.max(1, selectedStep - 1))}
+              className="px-5 py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs border border-slate-300 shadow-2xs flex items-center gap-1.5 cursor-pointer transition-colors"
             >
-              <ClipboardPaste className="w-4 h-4" />
-              <span>Cargar o Pegar Texto del Banco →</span>
-            </button>
-          ) : matchedTx.length === 0 ? (
-            <button
-              onClick={onRunReconciliation}
-              className="px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-black text-xs shadow-lg cursor-pointer transition-all flex items-center gap-2 animate-pulse"
-            >
-              <Zap className="w-4 h-4" />
-              <span>⚡ Ejecutar Conciliación Automática →</span>
+              <ArrowLeft className="w-4 h-4" />
+              <span>← Volver al Paso {selectedStep - 1}</span>
             </button>
           ) : (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={onNavigateToWorkspace}
-                className="px-5 py-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-extrabold text-xs shadow-md cursor-pointer transition-all flex items-center gap-1.5"
-              >
-                <span>Mesa de Trabajo →</span>
-              </button>
-              <button
-                onClick={onNavigateToResults}
-                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md cursor-pointer transition-all flex items-center gap-1.5"
-              >
-                <span>Ver Diagnóstico y Cédula →</span>
-              </button>
-            </div>
+            <div />
+          )}
+
+          {selectedStep < 5 && (
+            <button
+              onClick={() => handleStepChange(Math.min(5, selectedStep + 1))}
+              className="px-6 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs shadow-md flex items-center gap-2 cursor-pointer transition-all ml-auto"
+            >
+              <span>Continuar al Paso {selectedStep + 1} ({stepsInfo[selectedStep].shortTitle}) →</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          )}
+
+          {selectedStep === 5 && (
+            <button
+              onClick={() => {
+                handleStepChange(1);
+                showToast('¡Iniciando revisión desde el Paso 1!');
+              }}
+              className="px-5 py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md flex items-center gap-2 cursor-pointer transition-all ml-auto"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>Revisar desde el Paso 1</span>
+            </button>
           )}
         </div>
+
       </div>
 
     </div>

@@ -27,7 +27,9 @@ import {
   Lock,
   Trash2,
   Pencil,
-  Plus
+  Plus,
+  CheckSquare,
+  Tags
 } from 'lucide-react';
 import { BankTransaction, CurrencyType, MatchingStatus, TransactionSource, UserCompanyProfile } from '../types/accounting';
 import { VENEZUELAN_BANKS } from '../data/venNifAccounts';
@@ -39,6 +41,7 @@ import { FileUploadModal } from './FileUploadModal';
 import { runDatabaseHealthCheck } from '../services/healthCheckService';
 import { ClearReconciliationModal, ClearReconciliationOption } from './ClearReconciliationModal';
 import { TransactionEditorModal } from './TransactionEditorModal';
+import { BulkAccountAssignmentBar } from './BulkAccountAssignmentBar';
 
 interface ReconciliationWorkspaceProps {
   transactions: BankTransaction[];
@@ -158,6 +161,10 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   // Manual matching selection
   const [selectedBankId, setSelectedBankId] = useState<string | null>(null);
   const [selectedLedgerId, setSelectedLedgerId] = useState<string | null>(null);
+
+  // Selección múltiple para Asignación Masiva de Cuentas Contables (Bulk Account Assignment)
+  const [selectedPendingIds, setSelectedPendingIds] = useState<string[]>([]);
+  const selectedPendingSet = useMemo(() => new Set(selectedPendingIds), [selectedPendingIds]);
 
   // Modal de Carga Rápida de Libro Contable de Banco
   const [isLedgerModalOpen, setIsLedgerModalOpen] = useState(false);
@@ -373,6 +380,85 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
     }
     return matchesSearchTerm(t, searchTerm);
   });
+
+  // Partidas pendientes visibles para asignación contable masiva (Bulk Assignment)
+  const pendingBankTxList = useMemo(() => {
+    return bankTxList.filter(t => t.matchingStatus === 'UNMATCHED' || t.matchingStatus === 'DISCREPANCY');
+  }, [bankTxList]);
+
+  const pendingLedgerTxList = useMemo(() => {
+    return ledgerTxList.filter(t => t.matchingStatus === 'UNMATCHED' || t.matchingStatus === 'DISCREPANCY');
+  }, [ledgerTxList]);
+
+  const selectedPendingTransactions = useMemo(() => {
+    return transactions.filter(t => selectedPendingSet.has(t.id));
+  }, [transactions, selectedPendingSet]);
+
+  const selectedPendingTotalAmount = useMemo(() => {
+    return selectedPendingTransactions.reduce((acc, t) => acc + t.amountNominal, 0);
+  }, [selectedPendingTransactions]);
+
+  const toggleSelectPendingTx = (txId: string) => {
+    setSelectedPendingIds(prev =>
+      prev.includes(txId) ? prev.filter(id => id !== txId) : [...prev, txId]
+    );
+  };
+
+  const handleSelectAllPendingBank = () => {
+    const ids = pendingBankTxList.map(t => t.id);
+    setSelectedPendingIds(prev => Array.from(new Set([...prev, ...ids])));
+  };
+
+  const handleSelectAllPendingLedger = () => {
+    const ids = pendingLedgerTxList.map(t => t.id);
+    setSelectedPendingIds(prev => Array.from(new Set([...prev, ...ids])));
+  };
+
+  const handleSelectAllPendingBoth = () => {
+    const ids = [...pendingBankTxList, ...pendingLedgerTxList].map(t => t.id);
+    setSelectedPendingIds(ids);
+  };
+
+  const handleClearPendingSelection = () => {
+    setSelectedPendingIds([]);
+  };
+
+  // Aplicar cuenta contable en 1 solo clic y actualizar automáticamente el estado de matching
+  const handleApplyBulkAccount = (
+    code: string,
+    name: string,
+    moduleTag?: string,
+    autoReconciledBy: BankTransaction['autoReconciledBy'] = 'MANUAL'
+  ) => {
+    if (selectedPendingIds.length === 0) return;
+
+    const count = selectedPendingIds.length;
+    const nowIso = new Date().toLocaleDateString('es-VE');
+    const updated = transactions.map(t => {
+      if (selectedPendingSet.has(t.id)) {
+        return {
+          ...t,
+          accountCode: code,
+          accountName: name,
+          moduleTag: moduleTag || t.moduleTag || 'MOD_OTROS',
+          matchingStatus: 'MATCHED_EXACT' as MatchingStatus,
+          matchScore: 1.0,
+          autoReconciledBy: autoReconciledBy,
+          notes: t.notes
+            ? `${t.notes} | Asignación masiva [${code}]: ${nowIso}`
+            : `Asignación masiva: ${code} - ${name} (${nowIso})`
+        };
+      }
+      return t;
+    });
+
+    onUpdateTransactions(updated);
+    setSelectedPendingIds([]);
+    setReconcileResultToast(
+      `¡Asignación masiva exitosa! Se aplicó [${code} - ${name}] a ${count} ${count === 1 ? 'partida pendiente' : 'partidas pendientes'} y su estado se actualizó a Conciliado (MATCHED_EXACT).`
+    );
+    setTimeout(() => setReconcileResultToast(null), 6000);
+  };
 
   // Run 5-stage automated matching via Web Worker / non-blocking chunking
   const handleRunReconciliation = async () => {
@@ -690,6 +776,37 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
               <span>Limpiar</span>
             </button>
 
+            {/* Asignación Masiva de Cuentas Contables */}
+            <button
+              onClick={() => {
+                if (selectedPendingIds.length > 0) {
+                  setSelectedPendingIds([]);
+                } else {
+                  handleSelectAllPendingBoth();
+                }
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs border transition-all cursor-pointer ${
+                selectedPendingIds.length > 0
+                  ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                  : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border-indigo-200'
+              }`}
+              title="Selección y asignación contable masiva de cuentas para partidas pendientes"
+            >
+              <Tags className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Asignación Masiva</span>
+              {(pendingBankTxList.length > 0 || pendingLedgerTxList.length > 0) && (
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                  selectedPendingIds.length > 0
+                    ? 'bg-white text-indigo-800'
+                    : 'bg-indigo-200/80 text-indigo-950'
+                }`}>
+                  {selectedPendingIds.length > 0
+                    ? `${selectedPendingIds.length}`
+                    : `${pendingBankTxList.length + pendingLedgerTxList.length}`}
+                </span>
+              )}
+            </button>
+
             {/* Secondary Tools Dropdown */}
             <div className="relative">
               <button
@@ -716,6 +833,24 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                   <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
                     Opciones y Utilidades
                   </div>
+
+                  <button
+                    onClick={() => {
+                      handleSelectAllPendingBoth();
+                      setIsToolsMenuOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-indigo-50 text-slate-800 font-medium flex items-center justify-between cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Tags className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Asignación Masiva Cuentas</span>
+                    </div>
+                    {(pendingBankTxList.length + pendingLedgerTxList.length) > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-indigo-100 text-indigo-800 text-[10px] font-bold">
+                        {pendingBankTxList.length + pendingLedgerTxList.length}
+                      </span>
+                    )}
+                  </button>
 
                   {onOpenHealthCheckup && (
                     <button
@@ -1015,6 +1150,22 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
         />
       )}
 
+      {/* Asignación Masiva de Cuentas Contables (Barra cuando hay seleccionadas) */}
+      {selectedPendingIds.length > 0 && (
+        <BulkAccountAssignmentBar
+          selectedCount={selectedPendingIds.length}
+          selectedTotalAmount={selectedPendingTotalAmount}
+          currency={currency}
+          onApplyAccount={handleApplyBulkAccount}
+          onSelectAllPendingBank={handleSelectAllPendingBank}
+          onSelectAllPendingLedger={handleSelectAllPendingLedger}
+          onSelectAllPendingBoth={handleSelectAllPendingBoth}
+          onClearSelection={handleClearPendingSelection}
+          totalPendingBankCount={pendingBankTxList.length}
+          totalPendingLedgerCount={pendingLedgerTxList.length}
+        />
+      )}
+
       {/* Split Screen Workspace */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         
@@ -1033,6 +1184,28 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
               <span className="text-[11px] font-mono font-bold text-sky-900 hidden sm:inline mr-1">
                 Total: {sym} {bankTxList.reduce((acc, t) => acc + (t.txType === 'CREDIT' ? t.amountNominal : -t.amountNominal), 0).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
               </span>
+              {pendingBankTxList.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allBankPendingSelected = pendingBankTxList.every(t => selectedPendingSet.has(t.id));
+                    if (allBankPendingSelected) {
+                      setSelectedPendingIds(prev => prev.filter(id => !pendingBankTxList.some(t => t.id === id)));
+                    } else {
+                      handleSelectAllPendingBank();
+                    }
+                  }}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-lg font-bold text-[11px] border cursor-pointer transition-colors ${
+                    pendingBankTxList.some(t => selectedPendingSet.has(t.id))
+                      ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
+                      : 'bg-white hover:bg-sky-100 text-sky-900 border-sky-300'
+                  }`}
+                  title="Seleccionar todas las partidas pendientes del banco para asignación contable masiva"
+                >
+                  <CheckSquare className="w-3.5 h-3.5" />
+                  <span>Sel. Pendientes ({pendingBankTxList.length})</span>
+                </button>
+              )}
               <button
                 onClick={() => {
                   setUploadModalDefaultSource('BANK');
@@ -1126,12 +1299,16 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
             ) : (
               bankTxList.map((tx) => {
                 const isSelected = selectedBankId === tx.id;
+                const isPending = tx.matchingStatus === 'UNMATCHED' || tx.matchingStatus === 'DISCREPANCY';
+                const isBulkSelected = selectedPendingSet.has(tx.id);
                 return (
                   <div
                     key={tx.id}
                     onClick={() => setSelectedBankId(isSelected ? null : tx.id)}
                     className={`p-3 rounded-xl border transition-all cursor-pointer ${
-                      isSelected
+                      isBulkSelected
+                        ? 'border-indigo-500 bg-indigo-50/70 ring-2 ring-indigo-400/80 shadow-xs'
+                        : isSelected
                         ? 'border-purple-400 bg-purple-50/50 ring-2 ring-purple-300'
                         : tx.matchingStatus === 'MATCHED_EXACT'
                         ? 'border-emerald-200/70 bg-emerald-50/30'
@@ -1143,28 +1320,48 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-mono text-xs font-bold text-slate-900">
-                            {tx.referenceNum}
-                          </span>
-                          <span className="text-[11px] text-slate-500 font-medium">
-                            {tx.txDate}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-700 mt-1 font-medium line-clamp-2">
-                          {tx.rawDescription}
-                        </p>
-                        {tx.notes && (
-                          <p className="text-[10px] text-emerald-800 font-medium mt-0.5 italic bg-emerald-50/80 px-1.5 py-0.5 rounded border border-emerald-100 line-clamp-1">
-                            💡 {tx.notes}
+                      <div className="flex items-start gap-2.5">
+                        {/* Checkbox for Bulk Account Assignment */}
+                        {isPending && (
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSelectPendingTx(tx.id);
+                            }}
+                            className="pt-0.5 cursor-pointer shrink-0"
+                            title="Seleccionar para asignación masiva"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isBulkSelected}
+                              onChange={() => {}}
+                              className="w-4 h-4 rounded text-indigo-600 border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                            />
+                          </div>
+                        )}
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-xs font-bold text-slate-900">
+                              {tx.referenceNum}
+                            </span>
+                            <span className="text-[11px] text-slate-500 font-medium">
+                              {tx.txDate}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-700 mt-1 font-medium line-clamp-2">
+                            {tx.rawDescription}
                           </p>
-                        )}
-                        {tx.counterpartyRif && (
-                          <span className="inline-block mt-1 font-mono text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
-                            RIF: {tx.counterpartyRif}
-                          </span>
-                        )}
+                          {tx.notes && (
+                            <p className="text-[10px] text-emerald-800 font-medium mt-0.5 italic bg-emerald-50/80 px-1.5 py-0.5 rounded border border-emerald-100 line-clamp-1">
+                              💡 {tx.notes}
+                            </p>
+                          )}
+                          {tx.counterpartyRif && (
+                            <span className="inline-block mt-1 font-mono text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                              RIF: {tx.counterpartyRif}
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <div className="text-right shrink-0">
@@ -1220,10 +1417,17 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                     )}
 
                     {/* Quick actions per card */}
-                    <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                      <span className="text-slate-500 truncate max-w-[150px]">
-                        {tx.accountName || 'Sin asignar'}
-                      </span>
+                    <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] gap-2">
+                      <div className="flex items-center gap-1.5 truncate min-w-0">
+                        {tx.accountCode && (
+                          <span className="font-mono text-[10px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 shrink-0">
+                            {tx.accountCode}
+                          </span>
+                        )}
+                        <span className="text-slate-600 text-[11px] truncate" title={tx.accountName}>
+                          {tx.accountName || 'Sin asignar'}
+                        </span>
+                      </div>
                       
                       <div className="flex items-center gap-1.5">
                         {tx.matchingStatus === 'MATCHED_FUZZY' && (
@@ -1287,10 +1491,32 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                 Mayor General de Bancos ({ledgerTxList.length} asientos)
               </h3>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-mono font-bold text-emerald-900 hidden sm:inline">
+            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+              <span className="text-[11px] font-mono font-bold text-emerald-900 hidden sm:inline mr-1">
                 Total: {sym} {ledgerTxList.reduce((acc, t) => acc + (t.txType === 'CREDIT' ? t.amountNominal : -t.amountNominal), 0).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
               </span>
+              {pendingLedgerTxList.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allLedgerPendingSelected = pendingLedgerTxList.every(t => selectedPendingSet.has(t.id));
+                    if (allLedgerPendingSelected) {
+                      setSelectedPendingIds(prev => prev.filter(id => !pendingLedgerTxList.some(t => t.id === id)));
+                    } else {
+                      handleSelectAllPendingLedger();
+                    }
+                  }}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-lg font-bold text-[11px] border cursor-pointer transition-colors ${
+                    pendingLedgerTxList.some(t => selectedPendingSet.has(t.id))
+                      ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
+                      : 'bg-white hover:bg-emerald-100 text-emerald-900 border-emerald-300'
+                  }`}
+                  title="Seleccionar todas las partidas pendientes de este libro para asignación contable masiva"
+                >
+                  <CheckSquare className="w-3.5 h-3.5" />
+                  <span>Sel. Pendientes ({pendingLedgerTxList.length})</span>
+                </button>
+              )}
               <button
                 onClick={() => setIsWhatToTakeModalOpen(true)}
                 className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-900 font-bold text-[11px] cursor-pointer transition-colors"
@@ -1403,12 +1629,16 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
             ) : (
               ledgerTxList.map((tx) => {
                 const isSelected = selectedLedgerId === tx.id;
+                const isPending = tx.matchingStatus === 'UNMATCHED' || tx.matchingStatus === 'DISCREPANCY';
+                const isBulkSelected = selectedPendingSet.has(tx.id);
                 return (
                   <div
                     key={tx.id}
                     onClick={() => setSelectedLedgerId(isSelected ? null : tx.id)}
                     className={`p-3 rounded-xl border transition-all cursor-pointer ${
-                      isSelected
+                      isBulkSelected
+                        ? 'border-indigo-500 bg-indigo-50/70 ring-2 ring-indigo-400/80 shadow-xs'
+                        : isSelected
                         ? 'border-purple-400 bg-purple-50/50 ring-2 ring-purple-300'
                         : tx.matchingStatus === 'MATCHED_EXACT'
                         ? 'border-emerald-200/70 bg-emerald-50/30'
@@ -1420,28 +1650,48 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-mono text-xs font-bold text-slate-900">
-                            {tx.referenceNum}
-                          </span>
-                          <span className="text-[11px] text-slate-500 font-medium">
-                            {tx.txDate}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-700 mt-1 font-medium line-clamp-2">
-                          {tx.rawDescription}
-                        </p>
-                        {tx.notes && (
-                          <p className="text-[10px] text-emerald-800 font-medium mt-0.5 italic bg-emerald-50/80 px-1.5 py-0.5 rounded border border-emerald-100 line-clamp-1">
-                            💡 {tx.notes}
+                      <div className="flex items-start gap-2.5">
+                        {/* Checkbox for Bulk Account Assignment */}
+                        {isPending && (
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSelectPendingTx(tx.id);
+                            }}
+                            className="pt-0.5 cursor-pointer shrink-0"
+                            title="Seleccionar para asignación masiva"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isBulkSelected}
+                              onChange={() => {}}
+                              className="w-4 h-4 rounded text-indigo-600 border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                            />
+                          </div>
+                        )}
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-xs font-bold text-slate-900">
+                              {tx.referenceNum}
+                            </span>
+                            <span className="text-[11px] text-slate-500 font-medium">
+                              {tx.txDate}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-700 mt-1 font-medium line-clamp-2">
+                            {tx.rawDescription}
                           </p>
-                        )}
-                        {tx.accountCode && (
-                          <span className="inline-block mt-1 font-mono text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                            Cta: {tx.accountCode}
-                          </span>
-                        )}
+                          {tx.notes && (
+                            <p className="text-[10px] text-emerald-800 font-medium mt-0.5 italic bg-emerald-50/80 px-1.5 py-0.5 rounded border border-emerald-100 line-clamp-1">
+                              💡 {tx.notes}
+                            </p>
+                          )}
+                          {tx.accountCode && (
+                            <span className="inline-block mt-1 font-mono text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                              Cta: {tx.accountCode}
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <div className="text-right shrink-0">
@@ -1495,13 +1745,18 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                       </div>
                     )}
 
-                    <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-500 font-mono text-[10px]">
+                    <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] gap-2">
+                      <div className="flex items-center gap-1.5 truncate min-w-0">
+                        <span className="text-slate-500 font-mono text-[10px] shrink-0">
                           ID: {tx.id.slice(-6)}
                         </span>
+                        {tx.accountName && (
+                          <span className="text-slate-600 text-[10px] truncate" title={tx.accountName}>
+                            • {tx.accountName}
+                          </span>
+                        )}
                         {tx.matchedWithId && (
-                          <span className="text-emerald-700 font-mono text-[10px] font-semibold">
+                          <span className="text-emerald-700 font-mono text-[10px] font-semibold shrink-0">
                             ↔ {tx.matchedWithId.slice(-6)}
                           </span>
                         )}
