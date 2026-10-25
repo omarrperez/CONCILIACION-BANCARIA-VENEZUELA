@@ -1067,6 +1067,8 @@ export default function App() {
               transactions={transactions}
               onUpdateTransactions={setTransactions}
               onNewSupportsAdded={handleNewSupportsAdded}
+              digitalSupports={digitalSupports}
+              onUpdateDigitalSupports={setDigitalSupports}
             />
           </div>
 

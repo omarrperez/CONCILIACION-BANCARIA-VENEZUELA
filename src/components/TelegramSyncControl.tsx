@@ -18,7 +18,15 @@ import {
   Activity,
   Check,
   Eye,
-  EyeOff
+  EyeOff,
+  FolderOpen,
+  FileText,
+  Share2,
+  Copy,
+  Search,
+  Filter,
+  Tag,
+  ArrowRight
 } from 'lucide-react';
 import {
   getTelegramConfig,
@@ -34,29 +42,40 @@ import {
 } from '../services/telegramSyncService';
 import { runVenezuelanAutoMatcher } from '../services/venezuelanAutoMatcher';
 import { BankTransaction, DigitalSupportAttachment } from '../types/accounting';
+import { MODULE_MAP_NAMES } from '../services/geminiReceiptClassifier';
+import { RECONCILIATION_MODULES } from '../data/venNifAccounts';
 
 interface TelegramSyncControlProps {
   bcvRate: number;
   transactions: BankTransaction[];
   onUpdateTransactions: (updated: BankTransaction[]) => void;
   onNewSupportsAdded?: (supports: DigitalSupportAttachment[]) => void;
+  digitalSupports?: DigitalSupportAttachment[];
+  onUpdateDigitalSupports?: (updated: DigitalSupportAttachment[]) => void;
 }
 
 export const TelegramSyncControl: React.FC<TelegramSyncControlProps> = ({
   bcvRate,
   transactions,
   onUpdateTransactions,
-  onNewSupportsAdded
+  onNewSupportsAdded,
+  digitalSupports = [],
+  onUpdateDigitalSupports
 }) => {
   const [config, setConfig] = useState<TelegramConfig>(getTelegramConfig());
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'CONFIG' | 'HISTORY'>('CONFIG');
+  const [activeTab, setActiveTab] = useState<'CONFIG' | 'REPOSITORY' | 'INSTRUCTIONS' | 'HISTORY'>('CONFIG');
   const [testResult, setTestResult] = useState<{ success?: boolean; text?: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [eventHistory, setEventHistory] = useState<TelegramSyncEvent[]>(() => getTelegramEventHistory());
   const [showBotToken, setShowBotToken] = useState(false);
+
+  // Repository Filters
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('ALL');
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [copiedInstructions, setCopiedInstructions] = useState(false);
 
   // Form state
   const [tempToken, setTempToken] = useState(config.botToken);
@@ -128,7 +147,7 @@ export const TelegramSyncControl: React.FC<TelegramSyncControlProps> = ({
 
         const matchReport = runVenezuelanAutoMatcher({
           transactions: currentTxs,
-          availableSupports: newAttachments
+          availableSupports: [...digitalSupports, ...newAttachments]
         });
 
         onUpdateTransactions(matchReport.updatedTransactions);
@@ -163,7 +182,7 @@ export const TelegramSyncControl: React.FC<TelegramSyncControlProps> = ({
         clearInterval(autoSyncIntervalRef.current);
       }
     };
-  }, [config.autoSync, config.botToken, transactions, bcvRate]);
+  }, [config.autoSync, config.botToken, transactions, bcvRate, digitalSupports]);
 
   const handleToggleAutoSync = () => {
     const nextVal = !config.autoSync;
@@ -305,6 +324,77 @@ export const TelegramSyncControl: React.FC<TelegramSyncControlProps> = ({
     }
   };
 
+  // Cambiar categoría manualmente para redistribución
+  const handleChangeCategory = (supportId: string, newModuleTag: string) => {
+    if (!onUpdateDigitalSupports) return;
+    const updated = digitalSupports.map((sup) => {
+      if (sup.id === supportId) {
+        return {
+          ...sup,
+          moduleTag: newModuleTag,
+          extractedMetadata: {
+            ...sup.extractedMetadata,
+            repositorio_sugerido: newModuleTag
+          }
+        };
+      }
+      return sup;
+    });
+    onUpdateDigitalSupports(updated);
+
+    // Re-ejecutar matcher
+    const matchReport = runVenezuelanAutoMatcher({
+      transactions,
+      availableSupports: updated
+    });
+    onUpdateTransactions(matchReport.updatedTransactions);
+  };
+
+  // Generar un soporte de prueba de ejemplo para simular la recepción vía Telegram
+  const handleGenerateDemoSupport = () => {
+    const demoRef = Math.floor(10000000 + Math.random() * 90000000).toString();
+    const demoAmount = Math.floor(1000 + Math.random() * 8000);
+    const usdEq = Number((demoAmount / (bcvRate || 56.8)).toFixed(2));
+
+    const demoAttachment: DigitalSupportAttachment = {
+      id: `demo-tg-${Date.now()}`,
+      name: `Capture_Telegram_Banesco_Ref${demoRef.slice(-4)}`,
+      fileType: 'IMAGE',
+      dataUrl: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150" viewBox="0 0 300 150"><rect fill="%230f172a" width="300" height="150" rx="12"/><text x="15" y="35" font-family="sans-serif" font-size="14" font-weight="bold" fill="%2338bdf8">BANESCO PAGO MÓVIL</text><text x="15" y="65" font-family="sans-serif" font-size="12" fill="%23e2e8f0">Ref: ${demoRef}</text><text x="15" y="90" font-family="sans-serif" font-size="16" font-weight="bold" fill="%234ade80">Bs. ${demoAmount.toLocaleString('es-VE')},00</text><text x="15" y="120" font-family="sans-serif" font-size="11" fill="%2394a3b8">Recibido de @ClienteTelegram</text></svg>`,
+      sizeBytes: 2048,
+      uploadedAt: new Date().toISOString(),
+      notes: 'Soporte simulado de prueba enviado vía Telegram al Bot "soportes contables empresa".',
+      moduleTag: 'MOD_VENTAS',
+      extractedMetadata: {
+        banco_origen: 'Banesco Banco Universal',
+        banco_destino: 'Banco Mercantil C.A.',
+        tipo_operacion: 'Pago Móvil',
+        moneda: 'VES',
+        monto: demoAmount,
+        monto_usd_equivalente: usdEq,
+        referencia_completa: demoRef,
+        referencia_ultimos_4: demoRef.slice(-4),
+        fecha: new Date().toISOString().split('T')[0],
+        identificador_tercero: 'J-40192837-4',
+        repositorio_sugerido: 'MOD_VENTAS'
+      }
+    };
+
+    if (onNewSupportsAdded) {
+      onNewSupportsAdded([demoAttachment]);
+    }
+
+    // Auto-match con transacciones
+    const matchReport = runVenezuelanAutoMatcher({
+      transactions,
+      availableSupports: [...digitalSupports, demoAttachment]
+    });
+    onUpdateTransactions(matchReport.updatedTransactions);
+
+    setSyncStatusMsg(`¡Soporte de prueba recibido y clasificado en Cobro de Facturas / Ventas! (Ref: ${demoRef.slice(-4)})`);
+    setActiveTab('REPOSITORY');
+  };
+
   const handleClearHistory = () => {
     clearTelegramEventHistory();
     setEventHistory([]);
@@ -312,6 +402,40 @@ export const TelegramSyncControl: React.FC<TelegramSyncControlProps> = ({
 
   const handleRefreshHistory = () => {
     setEventHistory(getTelegramEventHistory());
+  };
+
+  // Filtrar soportes en el repositorio
+  const filteredSupports = digitalSupports.filter((s) => {
+    const matchesCat = selectedCategoryFilter === 'ALL' || s.moduleTag === selectedCategoryFilter;
+    const search = searchTerm.toLowerCase().trim();
+    const matchesSearch =
+      !search ||
+      s.name.toLowerCase().includes(search) ||
+      (s.notes || '').toLowerCase().includes(search) ||
+      (s.extractedMetadata?.referencia_completa || '').toLowerCase().includes(search) ||
+      (s.extractedMetadata?.banco_origen || '').toLowerCase().includes(search) ||
+      (s.extractedMetadata?.identificador_tercero || '').toLowerCase().includes(search);
+
+    return matchesCat && matchesSearch;
+  });
+
+  const clientShareInstructionsText = `📱 *RECEPCIÓN DE COMPROBANTES DE PAGO VÍA TELEGRAM*
+
+Estimado Cliente,
+Para agilizar la confirmación de sus pagos y la emisión inmediata de sus recibos, por favor envíe sus capturas de Pago Móvil, transferencias bancarias o archivos PDF directamente a nuestro Bot oficial de Telegram.
+
+🤖 *Bot Oficial:* @${tempToken ? 'SuBotTelegram' : 'SuBotRegistrado'}
+💡 *Instrucciones sencillas:*
+1. Abra Telegram y busque nuestro Bot oficial.
+2. Adjunte la foto del capture o archivo PDF del pago.
+3. El sistema inteligente verificará automáticamente la referencia, banco y monto.
+
+¡Gracias por su puntualidad y confianza!`;
+
+  const handleCopyClientText = () => {
+    navigator.clipboard.writeText(clientShareInstructionsText);
+    setCopiedInstructions(true);
+    setTimeout(() => setCopiedInstructions(false), 2500);
   };
 
   const hasErrorsInHistory = eventHistory.some((e) => e.type === 'ERROR');
@@ -348,7 +472,20 @@ export const TelegramSyncControl: React.FC<TelegramSyncControlProps> = ({
         </label>
       )}
 
-      {/* Botón Historial de Eventos (Diagnóstico Técnico) */}
+      {/* Botón Repositorio / Bandeja de Telegram */}
+      <button
+        onClick={() => {
+          setActiveTab('REPOSITORY');
+          setIsModalOpen(true);
+        }}
+        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-300 transition-colors cursor-pointer shadow-2xs"
+        title="Ver bandeja de entrada de soportes recibidos por Telegram y clasificados por categoría"
+      >
+        <FolderOpen className="w-3.5 h-3.5 text-sky-700" />
+        <span>Bandeja Telegram ({digitalSupports.length})</span>
+      </button>
+
+      {/* Botón Historial de Eventos */}
       <button
         onClick={() => {
           setActiveTab('HISTORY');
@@ -358,7 +495,7 @@ export const TelegramSyncControl: React.FC<TelegramSyncControlProps> = ({
           setIsModalOpen(true);
         }}
         className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 transition-colors cursor-pointer"
-        title="Ver historial de los últimos 5 intentos de sincronización (éxitos y errores)"
+        title="Ver historial de los últimos 5 intentos de sincronización"
       >
         <History className="w-3.5 h-3.5 text-slate-600" />
         <span>Historial ({eventHistory.length})</span>
@@ -392,10 +529,10 @@ export const TelegramSyncControl: React.FC<TelegramSyncControlProps> = ({
         </span>
       )}
 
-      {/* Modal de Configuración e Historial de Telegram Bot */}
+      {/* Modal Principal de Telegram Bot */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-xl w-full p-6 space-y-4 max-h-[90vh] flex flex-col">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-3xl w-full p-6 space-y-4 max-h-[90vh] flex flex-col">
             
             {/* Header del Modal */}
             <div className="flex items-center justify-between border-b border-slate-100 pb-3 shrink-0">
@@ -405,10 +542,10 @@ export const TelegramSyncControl: React.FC<TelegramSyncControlProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-extrabold text-slate-900">
-                    Módulo Telegram Bot (Sincronización Gratuita)
+                    Módulo Telegram Bot (Ingreso & Repositorio de Soportes)
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    Captures, fotos, notas de voz y diagnóstico de comunicación en tiempo real.
+                    Recepción automática de clientes, clasificación por IA Gemini y distribución a carpetas contables.
                   </p>
                 </div>
               </div>
@@ -420,19 +557,45 @@ export const TelegramSyncControl: React.FC<TelegramSyncControlProps> = ({
               </button>
             </div>
 
-            {/* Pestañas de Navegación: Configuración vs Historial de Eventos */}
-            <div className="flex items-center gap-2 border-b border-slate-200 shrink-0">
+            {/* Pestañas de Navegación */}
+            <div className="flex items-center gap-1.5 border-b border-slate-200 shrink-0 overflow-x-auto pb-1">
+              <button
+                type="button"
+                onClick={() => setActiveTab('REPOSITORY')}
+                className={`flex items-center gap-1.5 pb-2 px-3 text-xs font-bold border-b-2 transition-colors cursor-pointer shrink-0 ${
+                  activeTab === 'REPOSITORY'
+                    ? 'border-sky-600 text-sky-700'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <FolderOpen className="w-4 h-4" />
+                <span>📁 Repositorio & Categorías ({digitalSupports.length})</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setActiveTab('CONFIG')}
-                className={`flex items-center gap-1.5 pb-2 px-3 text-xs font-bold border-b-2 transition-colors cursor-pointer ${
+                className={`flex items-center gap-1.5 pb-2 px-3 text-xs font-bold border-b-2 transition-colors cursor-pointer shrink-0 ${
                   activeTab === 'CONFIG'
                     ? 'border-sky-600 text-sky-700'
                     : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
                 <Bot className="w-4 h-4" />
-                <span>Configuración & Pruebas</span>
+                <span>Configurar Bot Token</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('INSTRUCTIONS')}
+                className={`flex items-center gap-1.5 pb-2 px-3 text-xs font-bold border-b-2 transition-colors cursor-pointer shrink-0 ${
+                  activeTab === 'INSTRUCTIONS'
+                    ? 'border-sky-600 text-sky-700'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Share2 className="w-4 h-4" />
+                <span>📲 Compartir a Clientes</span>
               </button>
 
               <button
@@ -441,14 +604,14 @@ export const TelegramSyncControl: React.FC<TelegramSyncControlProps> = ({
                   setActiveTab('HISTORY');
                   setEventHistory(getTelegramEventHistory());
                 }}
-                className={`flex items-center gap-1.5 pb-2 px-3 text-xs font-bold border-b-2 transition-colors cursor-pointer ${
+                className={`flex items-center gap-1.5 pb-2 px-3 text-xs font-bold border-b-2 transition-colors cursor-pointer shrink-0 ${
                   activeTab === 'HISTORY'
                     ? 'border-sky-600 text-sky-700'
                     : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
                 <History className="w-4 h-4" />
-                <span>Historial de Eventos (Últimos 5)</span>
+                <span>Historial</span>
                 {eventHistory.length > 0 && (
                   <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
                     hasErrorsInHistory
@@ -461,7 +624,187 @@ export const TelegramSyncControl: React.FC<TelegramSyncControlProps> = ({
               </button>
             </div>
 
-            {/* CONTENIDO TAB 1: Configuración & Pruebas */}
+            {/* TAB 1: REPOSITORIO Y DISTRIBUCIÓN A CATEGORÍAS */}
+            {activeTab === 'REPOSITORY' && (
+              <div className="space-y-3.5 overflow-y-auto pr-1 flex-1 text-xs">
+                {/* Banner informativo de cómo la IA distribuye los soportes */}
+                <div className="bg-sky-50 rounded-xl p-3 border border-sky-200 text-sky-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-start gap-2">
+                    <Sparkles className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-extrabold text-xs block text-sky-900">
+                        Repositorio Inteligente de Soportes Recibidos
+                      </span>
+                      <p className="text-[11px] text-sky-800 leading-relaxed">
+                        Cada vez que un cliente envía un capture o PDF por Telegram, la IA Gemini extrae el banco, referencia y monto, asignándolo automáticamente a su categoría. Puedes cambiar manualmente la categoría con el selector en cada tarjeta.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={handleGenerateDemoSupport}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs shrink-0 cursor-pointer shadow-2xs flex items-center gap-1"
+                      title="Genera un soporte de prueba simulando una foto recibida por Telegram"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-200" />
+                      <span>🧪 Simular Recepción de Prueba</span>
+                    </button>
+
+                    <button
+                      onClick={handleSyncNow}
+                      disabled={isSyncing}
+                      className="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-lg text-xs shrink-0 cursor-pointer shadow-2xs flex items-center gap-1"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                      <span>{isSyncing ? 'Sincronizando...' : 'Recargar Ahora'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filtros de Búsqueda y Categoría */}
+                <div className="flex flex-col sm:flex-row items-center gap-2">
+                  <div className="relative flex-1 w-full">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por banco, referencia, cliente o nota..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1.5 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                    <Filter className="w-3.5 h-3.5 text-slate-400" />
+                    <select
+                      value={selectedCategoryFilter}
+                      onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+                      className="px-2.5 py-1.5 border border-slate-300 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-sky-500 focus:outline-none bg-white w-full sm:w-auto"
+                    >
+                      <option value="ALL">Todas las Categorías ({digitalSupports.length})</option>
+                      {RECONCILIATION_MODULES.map((m) => {
+                        const count = digitalSupports.filter((s) => s.moduleTag === m.id).length;
+                        return (
+                          <option key={m.id} value={m.id}>
+                            {m.title} ({count})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Lista de Soportes Recibidos */}
+                {filteredSupports.length === 0 ? (
+                  <div className="p-8 text-center bg-slate-50/50 rounded-2xl border border-dashed border-slate-200 space-y-2">
+                    <div className="w-10 h-10 mx-auto rounded-full bg-sky-50 flex items-center justify-center text-sky-500">
+                      <FolderOpen className="w-5 h-5" />
+                    </div>
+                    <div className="text-xs font-bold text-slate-700">
+                      No hay soportes en esta categoría o búsqueda
+                    </div>
+                    <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                      Presiona <strong>"🔄 Sincronizar Soportes desde Telegram"</strong> arriba para traer las últimas imágenes y PDFs enviados por tus clientes al bot.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {filteredSupports.map((sup) => {
+                      const meta = sup.extractedMetadata;
+                      const currentModuleTitle =
+                        MODULE_MAP_NAMES[sup.moduleTag || 'MOD_HUERFANOS'] || sup.moduleTag || 'Sin Categoría';
+
+                      return (
+                        <div
+                          key={sup.id}
+                          className="p-3.5 rounded-xl border border-slate-200 bg-white hover:border-sky-300 transition-all shadow-2xs space-y-2.5"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                            <div className="flex items-start gap-2.5">
+                              {/* Thumbnail / Icon */}
+                              <div className="w-12 h-12 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center">
+                                {sup.dataUrl && sup.dataUrl.startsWith('data:image') ? (
+                                  <img
+                                    src={sup.dataUrl}
+                                    alt="Soporte"
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <FileText className="w-6 h-6 text-sky-600" />
+                                )}
+                              </div>
+
+                              <div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-extrabold text-slate-900 text-xs">
+                                    {sup.name}
+                                  </span>
+                                  <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 border border-sky-200 flex items-center gap-1">
+                                    <Sparkles className="w-2.5 h-2.5 text-sky-600" />
+                                    <span>IA Clasificado</span>
+                                  </span>
+                                </div>
+
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  {sup.notes || 'Recibido vía Telegram'}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Selector de Redistribución Manual a Módulo */}
+                            <div className="bg-slate-50 p-2 rounded-xl border border-slate-200 shrink-0 space-y-1">
+                              <span className="text-[10px] text-slate-500 font-bold block flex items-center gap-1">
+                                <Tag className="w-3 h-3 text-slate-400" />
+                                <span>Distribuido en Categoría:</span>
+                              </span>
+                              <select
+                                value={sup.moduleTag || 'MOD_HUERFANOS'}
+                                onChange={(e) => handleChangeCategory(sup.id, e.target.value)}
+                                className="w-full px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-800 focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                              >
+                                {RECONCILIATION_MODULES.map((mod) => (
+                                  <option key={mod.id} value={mod.id}>
+                                    {mod.title}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Metadata Extraída por la IA */}
+                          {meta && (
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-100 text-[11px] bg-slate-50/70 p-2.5 rounded-lg">
+                              <div>
+                                <span className="text-slate-400 block text-[10px]">Banco:</span>
+                                <span className="font-bold text-slate-800">{meta.banco_origen || 'No especificado'}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block text-[10px]">Referencia:</span>
+                                <span className="font-mono font-bold text-slate-900">
+                                  {meta.referencia_completa || meta.referencia_ultimos_4 || 'Sin Ref'}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block text-[10px]">Monto:</span>
+                                <span className="font-mono font-bold text-emerald-700">
+                                  {meta.moneda === 'USD' ? '$' : 'Bs.'} {meta.monto ? meta.monto.toLocaleString('es-VE', { minimumFractionDigits: 2 }) : '0,00'}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block text-[10px]">Fecha:</span>
+                                <span className="font-mono font-bold text-slate-700">{meta.fecha || 'Hoy'}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 2: CONFIGURACIÓN Y PRUEBAS DEL BOT */}
             {activeTab === 'CONFIG' && (
               <div className="space-y-3.5 overflow-y-auto pr-1 flex-1 text-xs">
                 {/* Instrucciones 1-2-3 */}
@@ -572,7 +915,45 @@ export const TelegramSyncControl: React.FC<TelegramSyncControlProps> = ({
               </div>
             )}
 
-            {/* CONTENIDO TAB 2: Historial de Eventos (Últimos 5) */}
+            {/* TAB 3: COMPARTIR INSTRUCTIVO A CLIENTES */}
+            {activeTab === 'INSTRUCTIONS' && (
+              <div className="space-y-3.5 overflow-y-auto pr-1 flex-1 text-xs">
+                <div className="p-3.5 bg-sky-50 rounded-2xl border border-sky-200 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Share2 className="w-4 h-4 text-sky-700" />
+                    <span className="font-extrabold text-sky-950 text-xs">
+                      Texto de Notificación Listo para Copiar y Enviar a sus Clientes
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-sky-800 leading-relaxed">
+                    Copia esta plantilla de texto y envíala por WhatsApp, correo o redes sociales a tus clientes. Al enviar sus captures de Pago Móvil o transferencias a tu Bot de Telegram, se procesarán y guardarán automáticamente en tu aplicación.
+                  </p>
+                </div>
+
+                <div className="relative bg-slate-900 text-slate-100 p-4 rounded-xl font-mono text-xs leading-relaxed space-y-2 shadow-inner">
+                  <pre className="whitespace-pre-wrap font-sans text-xs">{clientShareInstructionsText}</pre>
+
+                  <button
+                    onClick={handleCopyClientText}
+                    className="absolute top-3 right-3 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-lg text-xs transition-colors cursor-pointer flex items-center gap-1.5 shadow-md"
+                  >
+                    {copiedInstructions ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-300" />
+                        <span>¡Copiado al Portapapeles!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copiar Mensaje</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 4: HISTORIAL DE EVENTOS */}
             {activeTab === 'HISTORY' && (
               <div className="space-y-3 overflow-y-auto pr-1 flex-1 text-xs">
                 {/* Banner de Diagnóstico */}
@@ -718,7 +1099,7 @@ export const TelegramSyncControl: React.FC<TelegramSyncControlProps> = ({
             {/* Footer Modal */}
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between shrink-0">
               <span className="text-[10px] text-slate-400 font-medium">
-                Telegram Bot API • Long Polling sin servidor intermedio
+                Telegram Bot API • Clasificación Inteligente Gemini 2.5 Flash
               </span>
 
               <div className="flex items-center gap-2">
