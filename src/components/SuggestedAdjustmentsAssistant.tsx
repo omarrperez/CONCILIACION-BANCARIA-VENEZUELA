@@ -358,7 +358,7 @@ export const SuggestedAdjustmentsAssistant: React.FC<SuggestedAdjustmentsAssista
                 Diferencia de Apertura (Banco vs Libros):
               </span>
               <p className="text-[10px] text-slate-400 mt-0.5">
-                Representa partidas pendientes del mes anterior (tránsito / cheques).
+                Representa partidas pendientes del mes anterior (tránsito / cheques o transferencias).
               </p>
             </div>
             <div className="mt-2 flex items-baseline justify-between pt-1 border-t border-slate-100">

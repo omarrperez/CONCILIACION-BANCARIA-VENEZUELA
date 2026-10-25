@@ -30,11 +30,13 @@ import {
   exportToGalac,
   exportToSaint,
   exportToValery,
-  triggerFileDownload
+  triggerFileDownload,
+  exportToReconciliationProofExcel
 } from './services/exportService';
 import { fetchLiveBcvRate, calculateUsdEquivalent } from './services/bcvService';
 import { runVenezuelanAutoMatcher, getLast4Digits } from './services/venezuelanAutoMatcher';
-import { ArrowLeft, Download, FileSpreadsheet, Sparkles, Zap, Bot, RefreshCw, Building2 } from 'lucide-react';
+import { processBankStatementForJustification } from './services/justificationPipeline';
+import { ArrowLeft, Download, FileSpreadsheet, Sparkles, Zap, Bot, RefreshCw, Building2, BookOpen } from 'lucide-react';
 
 // Components
 import { Navbar } from './components/Navbar';
@@ -57,6 +59,7 @@ import { RestorePointModal } from './components/RestorePointModal';
 import { PendingClarificationModule } from './components/PendingClarificationModule';
 import { TelegramSyncControl } from './components/TelegramSyncControl';
 import { MonthlyReconciliationVault } from './components/MonthlyReconciliationVault';
+import { BankAccountingRulesModal } from './components/BankAccountingRulesModal';
 import { DataHealthCheckupModal } from './components/DataHealthCheckupModal';
 import { runDatabaseHealthCheck } from './services/healthCheckService';
 import { EncryptedBackupModal } from './components/EncryptedBackupModal';
@@ -146,6 +149,7 @@ export default function App() {
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isTourOverlayOpen, setIsTourOverlayOpen] = useState(false);
+  const [isBankRulesModalOpen, setIsBankRulesModalOpen] = useState(false);
   const [assistantMode, setAssistantMode] = useState<'BANK' | 'LEDGER'>('BANK');
 
   // Check if onboarding should be shown on initial load
@@ -915,6 +919,18 @@ export default function App() {
     setActiveModule('JUSTIFICATION_MODULES');
   };
 
+  // Transferencia de TODO el estado de cuenta a Justificación Contable, SENIAT y Carpeta de Huérfanos
+  const handleTransferToJustification = () => {
+    const { updatedTransactions } = processBankStatementForJustification(
+      transactions,
+      currency,
+      company.bcvRate
+    );
+    setTransactions(updatedTransactions);
+    setActiveModule('JUSTIFICATION_MODULES');
+    setActivePage(2);
+  };
+
   const handleAssignModule = (txId: string, moduleTag: string, notes: string) => {
     setTransactions(prev =>
       prev.map(t => {
@@ -1235,6 +1251,7 @@ export default function App() {
                   onOpenRestoreModal={() => setIsRestoreModalOpen(true)}
                   onOpenTourOverlay={() => setIsTourOverlayOpen(true)}
                   onOpenClearModal={() => setIsClearModalOpen(true)}
+                  onNavigateToJustification={handleTransferToJustification}
                 />
               </div>
 
@@ -1278,12 +1295,29 @@ export default function App() {
                             Ecuación de Conciliación Matemática y Prueba de Efectivo
                           </h3>
                         </div>
-                        <button
-                          onClick={() => setIsProofModalOpen(true)}
-                          className="px-3 py-1.5 rounded-xl bg-slate-900 text-white font-bold text-xs hover:bg-slate-800 transition-colors cursor-pointer"
-                        >
-                          Ver Detalle Completo (4 Columnas) →
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              exportToReconciliationProofExcel({
+                                proof: proofOfCash,
+                                company,
+                                transactions,
+                                currency
+                              });
+                            }}
+                            className="px-3 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-900 font-bold text-xs hover:bg-emerald-100 transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+                            title="Descargar Portada Oficial y Cédula de Cuadre en Excel (.xlsx)"
+                          >
+                            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                            <span>Descargar Cuadre Excel (.xlsx)</span>
+                          </button>
+                          <button
+                            onClick={() => setIsProofModalOpen(true)}
+                            className="px-3 py-1.5 rounded-xl bg-slate-900 text-white font-bold text-xs hover:bg-slate-800 transition-colors cursor-pointer"
+                          >
+                            Ver Detalle Completo →
+                          </button>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
@@ -1302,7 +1336,7 @@ export default function App() {
                         </div>
 
                         <div className="p-3 rounded-xl bg-rose-50/60 border border-rose-100">
-                          <span className="text-[10px] text-rose-800 font-semibold block">(-) Cheques Pendientes</span>
+                          <span className="text-[10px] text-rose-800 font-semibold block">(-) Cheques / Transferencias Pendientes</span>
                           <span className="font-mono font-bold text-rose-700 text-sm">
                             -{currency === 'VES' ? 'Bs.' : '$'} {proofOfCash.outstandingChecks.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
                           </span>
@@ -1475,6 +1509,7 @@ export default function App() {
               onNavigateToWorkspace={() => setActiveModule('RECONCILIATION')}
               onNavigateToAssistant={handleNavigateToAssistant}
               onOpenProofModal={() => setIsProofModalOpen(true)}
+              onNavigateToJustification={handleTransferToJustification}
             />
           )}
 
@@ -1557,6 +1592,14 @@ export default function App() {
               selectedTxForJustification={txForJustification}
               onAssignModule={handleAssignModule}
               onUpdateTransactions={setTransactions}
+              onNavigateToSeniatTax={() => {
+                setActiveModule('SENIAT_TAX');
+                setActivePage(2);
+              }}
+              onNavigateToAuditVault={() => {
+                setActiveModule('AUDIT_VAULT');
+                setActivePage(2);
+              }}
             />
           )}
 
@@ -1787,6 +1830,64 @@ export default function App() {
             </div>
           )}
 
+          {/* 11. Reglas Oficiales de Contabilidad Bancaria por Banco (BDV, Mercantil, Plaza) */}
+          {activeModule === 'BANK_RULES' && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 sm:p-5 rounded-2xl border border-purple-200 shadow-2xs">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setActiveModule('DASHBOARD')}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition-colors cursor-pointer border border-slate-300 shadow-2xs shrink-0"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    <span>← Salir y Volver al Dashboard</span>
+                  </button>
+                  <div>
+                    <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                      <BookOpen className="w-5 h-5 text-purple-600" />
+                      <span>Reglas Oficiales de Contabilidad Bancaria Venezolana</span>
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      Bancamiga (0172), Banesco (0134 SGT), Banco de Venezuela (0102), Banco Mercantil (0105) y Banco Plaza (0138). Libro oficial en 5 columnas y 3 hojas balanceadas a 0.00.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsBankRulesModalOpen(true)}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    <span>Abrir Visor de Reglas</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Tarjeta explicativa y lanzador */}
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-2xs text-center space-y-4">
+                <div className="w-12 h-12 bg-purple-100 text-purple-700 rounded-2xl flex items-center justify-center mx-auto shadow-2xs">
+                  <BookOpen className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Reglas Contables Especializadas por Banco
+                </h3>
+                <p className="text-xs text-slate-600 max-w-xl mx-auto leading-relaxed">
+                  Las reglas aplican en orden estricto (1-N) para clasificar automáticamente notas de crédito (NC) y notas de débito (ND) contra cuentas de ingresos, proveedores, socios, comisiones bancarias, timbres fiscales e impuestos SENIAT. Cualquier partida no coincidente se asigna a la <strong>Carpeta de Huérfanos</strong>.
+                </p>
+                <div className="pt-2">
+                  <button
+                    onClick={() => setIsBankRulesModalOpen(true)}
+                    className="inline-flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    <span>Ver Reglas Detalladas y Exportar Libro en 3 Hojas Excel</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
         </section>
 
       </main>
@@ -1814,6 +1915,8 @@ export default function App() {
         proof={proofOfCash}
         currency={currency}
         bcvRate={company.bcvRate}
+        company={company}
+        transactions={transactions}
       />
 
       <AccountingExportModal
@@ -1822,6 +1925,7 @@ export default function App() {
         company={company}
         transactions={transactions}
         journalEntries={journalEntries}
+        proofOfCash={proofOfCash}
       />
 
       <CompanySettingsModal
@@ -1908,6 +2012,20 @@ export default function App() {
         selectedBank={selectedBankAccountId}
         currency={currency}
         onConfirmClear={handleClearReconciliation}
+      />
+
+      {/* Modal de Reglas de Contabilidad Bancaria por Banco */}
+      <BankAccountingRulesModal
+        isOpen={isBankRulesModalOpen || activeModule === 'BANK_RULES'}
+        onClose={() => {
+          setIsBankRulesModalOpen(false);
+          if (activeModule === 'BANK_RULES') setActiveModule('DASHBOARD');
+        }}
+        transactions={transactions}
+        currency={currency}
+        company={company}
+        initialBankCode={selectedBankAccountId !== 'ALL' ? selectedBankAccountId : '0102'}
+        onUpdateTransactions={setTransactions}
       />
 
     </div>

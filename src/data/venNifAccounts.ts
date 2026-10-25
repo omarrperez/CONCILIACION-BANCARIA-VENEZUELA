@@ -304,5 +304,5 @@ export const RECONCILIATION_MODULES = [
   { id: 'MOD_NOMINA', title: 'Nómina y Cargas Parafiscales', type: 'OUTFLOW', icon: 'Briefcase', description: 'Pago de sueldos, salarios, IVSS, FAOV y contribución especial Ley de Pensiones 2024.' },
   { id: 'MOD_SENIAT_PAGO', title: 'Liquidación Tributos SENIAT y Parafiscales', type: 'OUTFLOW', icon: 'Building2', description: 'Pago de impuestos nacionales (IVA Form 00030, ISLR Form 00026, Retenciones Form 00099, IGTF, BANAVIH y tasas municipales).' },
   { id: 'MOD_COMISIONES', title: 'Comisiones y Mantenimiento Bancario', type: 'OUTFLOW', icon: 'Landmark', description: 'Débitos bancarios por mantenimiento mensual, emisión de estados de cuenta, comisiones de pago móvil y SMS.' },
-  { id: 'MOD_OTROS', title: 'Otros / No Identificados', type: 'ALL', icon: 'ShieldCheck', description: 'Transacciones no clasificadas automáticamente que requieren revisión contable manual o soporte probatorio.' }
+  { id: 'MOD_HUERFANOS', title: 'Carpeta de Huérfanos (Sin Clasificar / Pendientes)', type: 'ALL', icon: 'AlertCircle', description: 'Todo movimiento del banco (entrada o salida de dinero) que no encaja en las 15 clasificaciones operativas, para saber cuáles son y cargarles sus soportes probatorios.' }
 ];

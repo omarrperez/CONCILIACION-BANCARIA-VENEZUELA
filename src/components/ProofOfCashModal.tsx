@@ -1,6 +1,7 @@
-import React from 'react';
-import { X, Printer, CheckCircle2, AlertTriangle, FileSpreadsheet } from 'lucide-react';
-import { ProofOfCash, CurrencyType } from '../types/accounting';
+import React, { useState } from 'react';
+import { X, Printer, CheckCircle2, AlertTriangle, FileSpreadsheet, Check } from 'lucide-react';
+import { ProofOfCash, CurrencyType, BankTransaction, UserCompanyProfile } from '../types/accounting';
+import { exportToReconciliationProofExcel } from '../services/exportService';
 
 interface ProofOfCashModalProps {
   isOpen: boolean;
@@ -8,6 +9,8 @@ interface ProofOfCashModalProps {
   proof: ProofOfCash;
   currency: CurrencyType;
   bcvRate: number;
+  company?: UserCompanyProfile;
+  transactions?: BankTransaction[];
 }
 
 export const ProofOfCashModal: React.FC<ProofOfCashModalProps> = ({
@@ -15,11 +18,26 @@ export const ProofOfCashModal: React.FC<ProofOfCashModalProps> = ({
   onClose,
   proof,
   currency,
-  bcvRate
+  bcvRate,
+  company,
+  transactions = []
 }) => {
+  const [downloadSuccess, setDownloadSuccess] = useState(false);
   if (!isOpen) return null;
 
   const sym = currency === 'VES' ? 'Bs.' : '$';
+
+  const handleDownloadExcel = () => {
+    exportToReconciliationProofExcel({
+      proof,
+      company: company || { companyName: 'EMPRESA CONTRIBUYENTE C.A.', companyRif: 'J-00000000-0', bcvRate, isSpecialTaxpayer: true } as any,
+      transactions,
+      currency
+    });
+    setDownloadSuccess(true);
+    setTimeout(() => setDownloadSuccess(false), 3000);
+  };
+
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
@@ -40,12 +58,31 @@ export const ProofOfCashModal: React.FC<ProofOfCashModalProps> = ({
               Periodo: {proof.period} | Moneda: {currency} (Tasa BCV: Bs. {bcvRate.toFixed(2)})
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDownloadExcel}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-bold transition-colors cursor-pointer shadow-xs"
+              title="Descargar Portada Oficial y Formato de Cuadre en Excel (.xlsx)"
+            >
+              {downloadSuccess ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>¡Descargado!</span>
+                </>
+              ) : (
+                <>
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Descargar Cuadre Excel (.xlsx)</span>
+                </>
+              )}
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Content */}
@@ -57,7 +94,7 @@ export const ProofOfCashModal: React.FC<ProofOfCashModalProps> = ({
               Ecuación de Conciliación Oficial (Libro - Banco)
             </span>
             <p className="font-mono text-emerald-900 font-semibold text-xs sm:text-sm">
-              S_libros = S_banco + Depósitos_Tránsito - Cheques_Pendientes + Notas_Crédito - Notas_Débito
+              S_libros = S_banco + Depósitos_Tránsito - Cheques_Transferencias_Pendientes + Notas_Crédito - Notas_Débito
             </p>
             <p className="mt-1 text-emerald-700 text-[11px]">
               El método de cuatro columnas garantiza la doble verificación tanto de saldos de apertura y cierre como del flujo bruto de débitos y créditos del periodo fiscal.
@@ -221,6 +258,14 @@ export const ProofOfCashModal: React.FC<ProofOfCashModalProps> = ({
             Documento de trabajo para auditoría externa y fiscalización SENIAT.
           </span>
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleDownloadExcel}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-bold transition-colors cursor-pointer shadow-xs"
+              title="Descargar Portada Oficial y Cédula de Cuadre en Excel (.xlsx)"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+              <span>{downloadSuccess ? '¡Excel Descargado!' : 'Descargar Cuadre Excel (.xlsx)'}</span>
+            </button>
             <button
               onClick={() => window.print()}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50 cursor-pointer"

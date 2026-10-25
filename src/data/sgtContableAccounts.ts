@@ -20,7 +20,7 @@ export const SGT_CONTABLE_ACCOUNTS: SgtAccountItem[] = [
   { code: '1.1.1.1.10', name: 'CAJA PRINCIPAL', monetary: 'S', type: 'CAJA', category: 'ACTIVO', nature: 'DEUDORA' },
   { code: '1.1.1.1.20', name: 'CAJA CHICA', monetary: 'S', type: 'CAJA', category: 'ACTIVO', nature: 'DEUDORA' },
   { code: '1.1.1.1.40', name: 'TARJETAS DE CREDITO EN CAJA', monetary: 'S', type: 'CAJA', category: 'ACTIVO', nature: 'DEUDORA' },
-  { code: '1.1.1.1.50', name: 'CHEQUES EN CAJA', monetary: 'S', type: 'CAJA', category: 'ACTIVO', nature: 'DEUDORA' },
+  { code: '1.1.1.1.50', name: 'CHEQUES / TRANSFERENCIAS EN CAJA', monetary: 'S', type: 'CAJA', category: 'ACTIVO', nature: 'DEUDORA' },
   
   // 1.1.1.2 BANCOS NACIONALES
   { code: '1.1.1.2', name: 'BANCOS NACIONALES', monetary: '', type: '', category: 'ACTIVO', nature: 'DEUDORA' },

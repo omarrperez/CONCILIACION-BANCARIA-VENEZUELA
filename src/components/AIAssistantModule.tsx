@@ -204,7 +204,7 @@ export const AIAssistantModule: React.FC<AIAssistantModuleProps> = ({
   const handleLoadSampleLedger = () => {
     const sample = `FECHA\tREFERENCIA\tCONCEPTO\tDEBE\tHABER
 10/05/2024\tTRF-0019283\tCobro Factura 00412 Distribuidora Los Andes\t45.000,00\t0,00
-11/05/2024\tCHQ-0004521\tPago Proveedor Materiales Eléctricos C.A.\t0,00\t18.250,00
+11/05/2024\tTRF-0004521\tPago Proveedor Materiales Eléctricos C.A.\t0,00\t18.250,00
 12/05/2024\tTRF-0084920\tNómina Primera Quincena Mayo Personal\t0,00\t12.800,00
 13/05/2024\tPAGO-992182\tPago Impuesto Retención IVA SENIAT\t0,00\t4.500,00
 14/05/2024\tDEP-0048192\tLiquidación Puntos de Venta (POS) Lote 492\t32.100,00\t0,00`;
@@ -213,7 +213,7 @@ export const AIAssistantModule: React.FC<AIAssistantModuleProps> = ({
 
   const handleLoadSampleBank = () => {
     const sample = `10/05/2024 REF: 0019283 CREDITO TRF RECIBIDA CLIENTE J-30492811-0 BS. 45.000,00
-11/05/2024 REF: 0004521 DEBITO CHEQUE PAGADO EN CAMARA COMPENSADORA BS. 18.250,00
+11/05/2024 REF: 0004521 DEBITO CHEQUE/TRANSFERENCIA PAGADA BS. 18.250,00
 12/05/2024 REF: 0084920 DEBITO PAGO NOMINA EMPLEADOS BANCO BS. 12.800,00
 13/05/2024 REF: 0048192 CREDITO LIQ POS CREDICARD LOTE 492 COMIS BS. 32.100,00
 14/05/2024 REF: 9002199 DEBITO COMISION MANTENIMIENTO CUENTA BS. 150,00`;

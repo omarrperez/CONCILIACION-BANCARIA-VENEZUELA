@@ -12,7 +12,7 @@ import {
   LogOut,
   Sparkles
 } from 'lucide-react';
-import { BankTransaction, JournalEntry, UserCompanyProfile } from '../types/accounting';
+import { BankTransaction, JournalEntry, ProofOfCash, UserCompanyProfile } from '../types/accounting';
 import {
   exportToSgtContableExcel,
   exportToSgtContableBatch,
@@ -22,7 +22,9 @@ import {
   exportToValery,
   exportToCsvVenNif,
   exportSeniatWithholdingTxt,
-  triggerFileDownload
+  triggerFileDownload,
+  exportToOfficialBankLedgerExcel,
+  exportToReconciliationProofExcel
 } from '../services/exportService';
 
 interface AccountingExportModalProps {
@@ -31,6 +33,7 @@ interface AccountingExportModalProps {
   company: UserCompanyProfile;
   transactions: BankTransaction[];
   journalEntries: JournalEntry[];
+  proofOfCash?: ProofOfCash;
 }
 
 export const AccountingExportModal: React.FC<AccountingExportModalProps> = ({
@@ -38,11 +41,13 @@ export const AccountingExportModal: React.FC<AccountingExportModalProps> = ({
   onClose,
   company,
   transactions,
-  journalEntries
+  journalEntries,
+  proofOfCash
 }) => {
   const [selectedFormat, setSelectedFormat] = useState<
-    'SGT_EXCEL' | 'SGT_BATCH' | 'PROFIT' | 'GALAC' | 'SAINT' | 'VALERY' | 'CSV' | 'SENIAT_TXT'
-  >(company?.accountingSystemTarget === 'SGT' ? 'SGT_EXCEL' : 'SGT_EXCEL');
+    'RECONCILIATION_PROOF_EXCEL' | 'BANK_LEDGER_3SHEETS' | 'SGT_EXCEL' | 'SGT_BATCH' | 'PROFIT' | 'GALAC' | 'SAINT' | 'VALERY' | 'CSV' | 'SENIAT_TXT'
+  >('RECONCILIATION_PROOF_EXCEL');
+
   const [downloadSuccess, setDownloadSuccess] = useState(false);
 
   // Close on Escape key
@@ -66,6 +71,49 @@ export const AccountingExportModal: React.FC<AccountingExportModalProps> = ({
     let filename = '';
 
     switch (formatId) {
+      case 'RECONCILIATION_PROOF_EXCEL': {
+        const fallbackProof: ProofOfCash = proofOfCash || {
+          period: `${new Date().toLocaleDateString('es-VE', { month: 'long', year: 'numeric' })}`,
+          bankCode: '0102',
+          currency: 'VES',
+          initialBalanceBank: 0,
+          inflowsBank: 0,
+          outflowsBank: 0,
+          finalBalanceBank: 0,
+          initialBalanceLedger: 0,
+          inflowsLedger: 0,
+          outflowsLedger: 0,
+          finalBalanceLedger: 0,
+          depositsInTransit: 0,
+          outstandingChecks: 0,
+          unrecordedCredits: 0,
+          unrecordedDebits: 0,
+          reconciledBank: 0,
+          reconciledLedger: 0,
+          difference: 0,
+          isBalanced: true
+        };
+        exportToReconciliationProofExcel({
+          proof: fallbackProof,
+          company,
+          transactions,
+          currency: 'VES'
+        });
+        setDownloadSuccess(true);
+        setTimeout(() => setDownloadSuccess(false), 3000);
+        return;
+      }
+
+      case 'BANK_LEDGER_3SHEETS': {
+        // Detect current bank code from transactions or default to 0102
+        const firstBankTx = transactions.find(t => t.source === 'BANK' && t.bankCode);
+        const bankCode = firstBankTx?.bankCode || '0102';
+        exportToOfficialBankLedgerExcel(transactions, bankCode, company, 'VES');
+        setDownloadSuccess(true);
+        setTimeout(() => setDownloadSuccess(false), 3000);
+        return;
+      }
+
       case 'SGT_EXCEL':
         exportToSgtContableExcel(journalEntries, company);
         setDownloadSuccess(true);
@@ -119,11 +167,27 @@ export const AccountingExportModal: React.FC<AccountingExportModalProps> = ({
 
   const formats = [
     {
-      id: 'SGT_EXCEL' as const,
-      title: 'SGT Contable (Excel Profesional .XLSX)',
-      desc: 'Formato ejecutivo en Excel de 3 hojas: Libro Diario con códigos exactos de SGT Contable, Mayor Analítico acumulado y Plan de Cuentas Maestro SGT.',
+      id: 'RECONCILIATION_PROOF_EXCEL' as const,
+      title: '📗 Cédula de Cuadre y Portada de Conciliación (Excel .XLSX)',
+      desc: 'Formato oficial de demostración de cuadre a Bs. 0,00 bajo Ven-NIF: Portada ejecutiva con dictamen de auditoría y firmas, demostración formal de la ecuación de conciliación, estado de prueba de efectivo de 4 columnas y detalle analítico de partidas en tránsito.',
       ext: '.XLSX',
       recommended: true,
+      color: 'emerald'
+    },
+    {
+      id: 'BANK_LEDGER_3SHEETS' as const,
+      title: 'Libro de Bancos Oficial (Excel 3 Hojas - Formato -1.234,10 / 1.234,10)',
+      desc: 'Formato reglamentario de 5 columnas en 3 Hojas con formato numérico venezolano estricto (-1.234,10 y 1.234,10): Hoja 1 (Entrada Contable), Hoja 2 (Ingresos NC contra Cuentas por Cobrar 1.1.2.1.10 = 0,00), Hoja 3 (Egresos ND con partida doble = 0,00).',
+      ext: '.XLSX',
+      recommended: false,
+      color: 'cyan'
+    },
+    {
+      id: 'SGT_EXCEL' as const,
+      title: 'SGT Contable (Excel Profesional .XLSX)',
+      desc: 'Formato ejecutivo en Excel de 3 hojas con fecha XX-XX-XXXX y formato numérico venezolano (-1.234,10 y 1.234,10): Libro Diario con códigos exactos SGT, Mayor Analítico acumulado y Plan de Cuentas Maestro SGT.',
+      ext: '.XLSX',
+      recommended: false,
       color: 'emerald'
     },
     {

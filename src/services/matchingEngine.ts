@@ -971,7 +971,7 @@ export async function runAutomatedReconciliationAsync(
 
 /**
  * Calcula el Estado de Demostración de Flujos y Cuadre de Bancos (Proof of Cash de 4 Columnas)
- * Fórmula venezolana Ven-NIF: Saldo Conciliado = Saldo Banco + Depósitos en Tránsito - Cheques Pendientes
+ * Fórmula venezolana Ven-NIF: Saldo Conciliado = Saldo Banco + Depósitos en Tránsito - Cheques/Transferencias Pendientes
  */
 export function calculateProofOfCash(
   transactions: BankTransaction[],
@@ -999,7 +999,7 @@ export function calculateProofOfCash(
     .filter(t => t.txType === 'CREDIT' && t.matchingStatus === 'UNMATCHED')
     .reduce((acc, t) => acc + (t.amountNominal || 0), 0);
 
-  // Cheques o débitos pendientes en tránsito: Débito en libros (pago) no cobrado aún en el banco
+  // Cheques/Transferencias o débitos pendientes en tránsito: Débito en libros (pago) no cobrado aún en el banco
   const outstandingChecks = ledgerTx
     .filter(t => t.txType === 'DEBIT' && t.matchingStatus === 'UNMATCHED')
     .reduce((acc, t) => acc + (t.amountNominal || 0), 0);

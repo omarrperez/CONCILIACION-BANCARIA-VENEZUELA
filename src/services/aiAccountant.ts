@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { BankTransaction, JournalEntry, JournalEntryLine } from '../types/accounting';
 import { extractMetadataFromDescription } from './matchingEngine';
+import { classifyTransactionByBankRules } from './bankAccountingRules';
 
 export interface AIParsedBankRow {
   bankCode: string;
@@ -37,7 +38,8 @@ export function categorizeTransactionRuleBased(
   amount: number,
   txType: 'CREDIT' | 'DEBIT',
   currency: 'VES' | 'USD' = 'VES',
-  bankName: string = 'Banesco'
+  bankName: string = 'Banesco',
+  explicitBankCode?: string
 ): {
   accountCode: string;
   accountName: string;
@@ -45,6 +47,38 @@ export function categorizeTransactionRuleBased(
   rationale: string;
   journalEntry: JournalEntryLine[];
 } {
+  // 1. Detección automática del código de banco
+  let code = explicitBankCode || '0134';
+  const bnUpper = bankName.toUpperCase();
+  if (bnUpper.includes('VENEZUELA') || bnUpper.includes('BDV') || code === '0102') code = '0102';
+  else if (bnUpper.includes('MERCANTIL') || code === '0105') code = '0105';
+  else if (bnUpper.includes('PLAZA') || code === '0138') code = '0138';
+  else if (bnUpper.includes('BANESCO') || code === '0134') code = '0134';
+  else if (bnUpper.includes('BANCAMIGA') || code === '0172') code = '0172';
+  else if (bnUpper.includes('BNC') || bnUpper.includes('NACIONAL DE CREDITO') || code === '0191') code = '0191';
+  else if (bnUpper.includes('PROVINCIAL') || bnUpper.includes('BBVA') || code === '0108') code = '0108';
+
+  // 2. Prioridad 1: Aplicación estricta de Reglas de Contabilidad por Banco (BDV, Mercantil, Plaza, Banesco SGT)
+  const bankRuleResult = classifyTransactionByBankRules(rawDesc, amount, txType, code);
+  if (bankRuleResult.matchedRule) {
+    const isCredit = txType === 'CREDIT';
+    return {
+      accountCode: bankRuleResult.accountCode,
+      accountName: bankRuleResult.accountName,
+      moduleTag: bankRuleResult.moduleTag,
+      rationale: `Regla bancaria oficial (${bankRuleResult.matchedRule.name}). ${bankRuleResult.matchedRule.notes || ''}`,
+      journalEntry: isCredit
+        ? [
+            { accountCode: bankRuleResult.accountCode, accountName: bankRuleResult.accountName, debe: amount, haber: 0, concept: rawDesc },
+            { accountCode: bankRuleResult.contraAccountCode, accountName: bankRuleResult.contraAccountName, debe: 0, haber: amount, concept: `Contrapartida ${rawDesc}` }
+          ]
+        : [
+            { accountCode: bankRuleResult.accountCode, accountName: bankRuleResult.accountName, debe: amount, haber: 0, concept: rawDesc },
+            { accountCode: bankRuleResult.contraAccountCode, accountName: bankRuleResult.contraAccountName, debe: 0, haber: amount, concept: `Débito ${rawDesc}` }
+          ]
+    };
+  }
+
   const upper = rawDesc.toUpperCase();
   const meta = extractMetadataFromDescription(rawDesc);
 
@@ -313,15 +347,17 @@ export function categorizeTransactionRuleBased(
     };
   }
 
-  // 12. Fallback: Otros / No Identificados (para revisión contable manual)
+  // 12. Fallback: Carpeta de Huérfanos (para partidas que no encajan en las 15 clasificaciones operativas)
   return {
     accountCode: txType === 'CREDIT' ? '1.1.02.01.001' : '2.1.02.01.001',
-    accountName: txType === 'CREDIT' ? 'Partidas Bancarias Pendientes de Identificar (Ingresos)' : 'Partidas Bancarias Pendientes de Identificar (Egresos)',
-    moduleTag: 'MOD_OTROS',
-    rationale: 'Transacción no identificada automáticamente. Requiere asignación y soporte probatorio en el Módulo de Justificación.',
+    accountName: txType === 'CREDIT'
+      ? 'Partida Huérfana Bancaria (Entrada por Justificar)'
+      : 'Partida Huérfana Bancaria (Salida por Justificar)',
+    moduleTag: 'MOD_HUERFANOS',
+    rationale: 'Movimiento bancario no clasificado en los 15 módulos estándar. Asignado a la Carpeta de Huérfanos para identificar y cargar su soporte probatorio.',
     journalEntry: [
-      { accountCode: txType === 'CREDIT' ? '1.1.01.02.001' : '2.1.02.01.001', accountName: txType === 'CREDIT' ? `${bankName} Cta Corriente` : 'Partidas por Identificar', debe: amount, haber: 0, concept: rawDesc },
-      { accountCode: txType === 'CREDIT' ? '1.1.02.01.001' : '1.1.01.02.001', accountName: txType === 'CREDIT' ? 'Partidas por Identificar' : `${bankName} Cta Corriente`, debe: 0, haber: amount, concept: rawDesc }
+      { accountCode: txType === 'CREDIT' ? '1.1.01.02.001' : '2.1.02.01.001', accountName: txType === 'CREDIT' ? `${bankName} Cta Corriente` : 'Partidas Huérfanas de Banco', debe: amount, haber: 0, concept: rawDesc },
+      { accountCode: txType === 'CREDIT' ? '1.1.02.01.001' : '1.1.01.02.001', accountName: txType === 'CREDIT' ? 'Partidas Huérfanas de Banco' : `${bankName} Cta Corriente`, debe: 0, haber: amount, concept: rawDesc }
     ]
   };
 }
@@ -411,7 +447,7 @@ Responde ÚNICAMENTE con el bloque JSON válido, sin texto introductorio ni expl
           rows.push(row);
 
           // Generate balanced journal entry
-          const ruleBased = categorizeTransactionRuleBased(row.rawDescription, row.amountNominal, row.txType, currency, bankName);
+          const ruleBased = categorizeTransactionRuleBased(row.rawDescription, row.amountNominal, row.txType, currency, bankName, selectedBankCode);
           entries.push({
             id: `entry-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
             date: row.txDate,
@@ -475,7 +511,7 @@ Responde ÚNICAMENTE con el bloque JSON válido, sin texto introductorio ni expl
       line.match(/\b(\d{4}[-/.]\d{2}[-/.]\d{2})\b/);
     const txDate = dateMatch ? normalizeDate(dateMatch[1]) : new Date().toISOString().split('T')[0];
 
-    const rule = categorizeTransactionRuleBased(line, amount, txType, currency, bankName);
+    const rule = categorizeTransactionRuleBased(line, amount, txType, currency, bankName, selectedBankCode);
 
     const row: AIParsedBankRow = {
       bankCode: selectedBankCode,

@@ -22,10 +22,15 @@ import {
   FileSpreadsheet,
   TrendingDown,
   TrendingUp,
-  FileText
+  FileText,
+  FolderCheck,
+  FolderOpen
 } from 'lucide-react';
 import { BankTransaction, CurrencyType, ProofOfCash, UserCompanyProfile } from '../types/accounting';
 import { generateSuggestedAdjustments, applyAdjustmentProposals } from '../services/adjustmentEngine';
+import { processBankStatementForJustification } from '../services/justificationPipeline';
+import { exportToReconciliationProofExcel } from '../services/exportService';
+
 
 interface ReconciliationProcessRoadmapProps {
   transactions: BankTransaction[];
@@ -49,6 +54,7 @@ interface ReconciliationProcessRoadmapProps {
   onOpenClearModal?: () => void;
   activeStep?: number;
   onSelectStep?: (step: number) => void;
+  onNavigateToJustification?: () => void;
 }
 
 export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmapProps> = ({
@@ -72,7 +78,8 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
   onOpenTourOverlay,
   onOpenClearModal,
   activeStep,
-  onSelectStep
+  onSelectStep,
+  onNavigateToJustification
 }) => {
   const sym = currency === 'VES' ? 'Bs.' : '$';
 
@@ -197,6 +204,25 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
       showToast(`🎉 ¡Saldos sincronizados! Tu conciliación ahora está cuadrada al 100%.`);
     } else {
       showToast(`¡Excelente! Todos los movimientos ya están cuadrados al 100%.`);
+    }
+  };
+
+  // Transferencia de TODO el estado de cuenta al Módulo de Justificación Contable, Fiscal y Carpeta de Huérfanos
+  const handleTransferToJustification = () => {
+    if (!onUpdateTransactions) return;
+    const { updatedTransactions, summary } = processBankStatementForJustification(
+      transactions,
+      currency,
+      bcvRate
+    );
+    onUpdateTransactions(updatedTransactions);
+    showToast(
+      `¡Estado de cuenta transferido! ${summary.totalBankItems} partidas analizadas (${summary.classifiedStandardCount} clasificadas en módulos y ${summary.orphansCount} en la Carpeta de Huérfanos).`
+    );
+    if (onNavigateToJustification) {
+      setTimeout(() => {
+        onNavigateToJustification();
+      }, 700);
     }
   };
 
@@ -721,7 +747,15 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
                   </p>
                 </div>
 
-                {!proofOfCash.isBalanced && (
+                {proofOfCash.isBalanced ? (
+                  <button
+                    onClick={handleTransferToJustification}
+                    className="px-6 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs shadow-lg cursor-pointer transition-all flex items-center justify-center gap-2 shrink-0 border border-emerald-400"
+                  >
+                    <FolderOpen className="w-5 h-5 text-emerald-400" />
+                    <span>📁 Pasar a Justificación y Soportes (1 Clic) →</span>
+                  </button>
+                ) : (
                   <button
                     onClick={handleAutoBalanceAllDifferences}
                     className="px-6 py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs shadow-lg cursor-pointer transition-all flex items-center justify-center gap-2 shrink-0 animate-bounce"
@@ -842,7 +876,7 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
                 </div>
 
                 <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200">
-                  <span className="text-[10px] text-rose-800 font-bold block uppercase">(-) Cheques Pendientes</span>
+                  <span className="text-[10px] text-rose-800 font-bold block uppercase">(-) Cheques / Transferencias Pendientes</span>
                   <strong className="font-mono text-base font-extrabold text-rose-800 mt-1 block">
                     -{sym} {proofOfCash.outstandingChecks.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
                   </strong>
@@ -873,13 +907,38 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
                   <span>Ver Detalle de Cédula (4 Columnas)</span>
                 </button>
 
-                <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                  <button
+                    onClick={() => {
+                      exportToReconciliationProofExcel({
+                        proof: proofOfCash,
+                        company,
+                        transactions,
+                        currency
+                      });
+                      showToast('¡Cédula de Cuadre y Portada de Conciliación descargada en Excel (.xlsx)!');
+                    }}
+                    className="flex-1 sm:flex-initial px-5 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-black text-xs shadow-md transition-colors cursor-pointer flex items-center justify-center gap-2 border border-teal-600"
+                    title="Descargar Portada Oficial y Formato de Cuadre de Conciliación en Excel (.xlsx)"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-200" />
+                    <span>📗 Descargar Cuadre de Conciliación en Excel (.xlsx)</span>
+                  </button>
+
+                  <button
+                    onClick={handleTransferToJustification}
+                    className="flex-1 sm:flex-initial px-5 py-2.5 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white font-black text-xs shadow-md transition-colors cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <FolderCheck className="w-4 h-4 text-cyan-200" />
+                    <span>📁 Justificar Todo el Estado de Cuenta & Huérfanos</span>
+                  </button>
+
                   <button
                     onClick={onOpenExportModal}
                     className="flex-1 sm:flex-initial px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md transition-colors cursor-pointer flex items-center justify-center gap-2"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Descargar Excel Oficial (SGT / Gálac / Profit)</span>
+                    <span>Exportar ERP / Asientos</span>
                   </button>
                 </div>
               </div>

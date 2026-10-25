@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { BankTransaction, CurrencyType, MatchingStatus, TransactionSource, UserCompanyProfile } from '../types/accounting';
 import { VENEZUELAN_BANKS } from '../data/venNifAccounts';
-import { runAutomatedReconciliation, runAutomatedReconciliationAsync, ReconciliationProgress } from '../services/matchingEngine';
+import { runAutomatedReconciliation, runAutomatedReconciliationAsync, calculateProofOfCash, ReconciliationProgress } from '../services/matchingEngine';
 import { parseAndCategorizeLedgerText, AIParsedLedgerRow } from '../services/aiAccountant';
 import { SuggestedAdjustmentsAssistant } from './SuggestedAdjustmentsAssistant';
 import { generateSuggestedAdjustments } from '../services/adjustmentEngine';
@@ -42,6 +42,9 @@ import { runDatabaseHealthCheck } from '../services/healthCheckService';
 import { ClearReconciliationModal, ClearReconciliationOption } from './ClearReconciliationModal';
 import { TransactionEditorModal } from './TransactionEditorModal';
 import { BulkAccountAssignmentBar } from './BulkAccountAssignmentBar';
+import { BankAccountingRulesModal } from './BankAccountingRulesModal';
+import { classifyTransactionByBankRules, generateBankLedgerExcel } from '../services/bankAccountingRules';
+import { exportToReconciliationProofExcel } from '../services/exportService';
 
 interface ReconciliationWorkspaceProps {
   transactions: BankTransaction[];
@@ -169,6 +172,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   // Modal de Carga Rápida de Libro Contable de Banco
   const [isLedgerModalOpen, setIsLedgerModalOpen] = useState(false);
   const [isWhatToTakeModalOpen, setIsWhatToTakeModalOpen] = useState(false);
+  const [isBankRulesModalOpen, setIsBankRulesModalOpen] = useState(false);
   const [ledgerPastedText, setLedgerPastedText] = useState('');
   const [ledgerBankCode, setLedgerBankCode] = useState('0134');
   const [isProcessingLedger, setIsProcessingLedger] = useState(false);
@@ -440,7 +444,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
           ...t,
           accountCode: code,
           accountName: name,
-          moduleTag: moduleTag || t.moduleTag || 'MOD_OTROS',
+          moduleTag: moduleTag || t.moduleTag || 'MOD_HUERFANOS',
           matchingStatus: 'MATCHED_EXACT' as MatchingStatus,
           matchScore: 1.0,
           autoReconciledBy: autoReconciledBy,
@@ -590,32 +594,50 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
     setTimeout(() => setReconcileResultToast(null), 5000);
   };
 
-  // Generar asientos contables automáticamente desde los movimientos bancarios cargados
+  // Generar asientos contables automáticamente desde los movimientos bancarios cargados usando las reglas oficiales del banco (BDV, Mercantil, Plaza)
   const handleAutoGenerateLedgerFromBank = () => {
     if (bankTxList.length === 0) return;
 
-    const generated: BankTransaction[] = bankTxList.map((tx, idx) => ({
-      id: `led-gen-${Date.now()}-${idx}`,
-      source: 'LEDGER',
-      bankCode: tx.bankCode,
-      bankName: tx.bankName,
-      referenceNum: tx.referenceNum,
-      txDate: tx.txDate,
-      txType: tx.txType,
-      amountNominal: tx.amountNominal,
-      currency: tx.currency,
-      bcvRate,
-      amountVes: tx.amountVes,
-      rawDescription: `${tx.rawDescription} (Asiento Contable Interno)`,
-      counterpartyRif: tx.counterpartyRif,
-      counterpartyName: tx.counterpartyName,
-      accountCode: tx.accountCode || '1.1.01.02.001',
-      accountName: tx.accountName || `${tx.bankName} Cta Corriente`,
-      matchingStatus: 'UNMATCHED',
-      moduleTag: tx.moduleTag,
-      notes: 'Asiento contable generado automáticamente para pareo de conciliación',
-      createdAt: new Date().toISOString()
-    }));
+    const targetBankCode = selectedBank !== 'ALL' ? selectedBank : (bankTxList[0]?.bankCode || '0102');
+
+    const generated: BankTransaction[] = bankTxList.map((tx, idx) => {
+      const bCode = tx.bankCode || targetBankCode;
+      const bankRuleResult = classifyTransactionByBankRules(
+        tx.rawDescription,
+        tx.amountNominal,
+        tx.txType,
+        bCode
+      );
+
+      const isCredit = tx.txType === 'CREDIT' || tx.amountNominal > 0;
+      const assignedAccountCode = tx.accountCode || (isCredit ? (bankRuleResult.contraAccountCode || '1.1.2.1.10') : bankRuleResult.accountCode);
+      const assignedAccountName = tx.accountName || (isCredit ? (bankRuleResult.contraAccountName || 'Cuentas por Cobrar Clientes') : bankRuleResult.accountName);
+
+      return {
+        id: `led-gen-${Date.now()}-${idx}`,
+        source: 'LEDGER' as const,
+        bankCode: bCode,
+        bankName: tx.bankName,
+        referenceNum: tx.referenceNum,
+        txDate: tx.txDate,
+        txType: tx.txType,
+        amountNominal: tx.amountNominal,
+        currency: tx.currency,
+        bcvRate,
+        amountVes: tx.amountVes,
+        rawDescription: `${tx.rawDescription} (Asiento Contable Interno)`,
+        counterpartyRif: tx.counterpartyRif,
+        counterpartyName: tx.counterpartyName,
+        accountCode: assignedAccountCode,
+        accountName: assignedAccountName,
+        matchingStatus: 'UNMATCHED' as const,
+        moduleTag: bankRuleResult.isUnclassified ? 'MOD_HUERFANOS' : (tx.moduleTag || bankRuleResult.moduleTag),
+        notes: bankRuleResult.matchedRule
+          ? `Generado según ${bankRuleResult.matchedRule.name}`
+          : 'Generado automáticamente según reglas de banco (Pendiente en Huérfanos)',
+        createdAt: new Date().toISOString()
+      };
+    });
 
     if (onAddParsedTransactions) {
       onAddParsedTransactions(generated);
@@ -623,7 +645,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
       onUpdateTransactions([...transactions, ...generated]);
     }
 
-    setReconcileResultToast(`¡Se generaron ${generated.length} asientos contables en el Mayor de Bancos a partir del extracto! Ahora puedes pulsar 'Conciliar Automáticamente'.`);
+    setReconcileResultToast(`¡Se generaron ${generated.length} asientos contables en el Mayor de Bancos aplicando las reglas de ${targetBankCode}! Ahora puedes pulsar 'Conciliar Automáticamente'.`);
     setTimeout(() => setReconcileResultToast(null), 6000);
   };
 
@@ -662,7 +684,17 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
           </div>
         </div>
 
-        <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+        <div className="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap">
+          {/* Botón de Reglas Oficiales de Bancos (Banesco, Bancamiga, BDV, Mercantil, Plaza) */}
+          <button
+            onClick={() => setIsBankRulesModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-800 font-bold text-xs border border-purple-200 shadow-2xs cursor-pointer transition-colors"
+            title="Inspeccionar y aplicar Reglas Contables Oficiales por Banco (Banesco 0134 SGT, Bancamiga 0172, BDV 0102, Mercantil 0105, Plaza 0138) y exportar Libro de 3 Hojas"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-purple-600" />
+            <span>📖 Reglas de Bancos (Bancamiga, Banesco, BDV, Mercantil, Plaza)</span>
+          </button>
+
           <button
             onClick={() => setIsWhatToTakeModalOpen(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs border border-slate-200 shadow-2xs cursor-pointer transition-colors"
@@ -833,6 +865,60 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                   <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
                     Opciones y Utilidades
                   </div>
+
+                  <button
+                    onClick={() => {
+                      setIsBankRulesModalOpen(true);
+                      setIsToolsMenuOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-purple-50 text-slate-800 font-medium flex items-center justify-between cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2">
+                      <BookOpen className="w-3.5 h-3.5 text-purple-600" />
+                      <span>Reglas de Bancos (Bancamiga, Banesco, BDV, Mercantil, Plaza)</span>
+                    </div>
+                    <span className="px-1.5 py-0.2 rounded-full bg-purple-100 text-purple-800 text-[10px] font-bold">
+                      SGT • Oficiales
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setIsToolsMenuOpen(false);
+                      const targetBank = selectedBank !== 'ALL' ? selectedBank : '0102';
+                      generateBankLedgerExcel(transactions, targetBank, company, currency);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-emerald-50 text-slate-800 font-medium flex items-center justify-between cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2">
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Descargar Libro Bancos (3 Hojas Excel)</span>
+                    </div>
+                    <span className="text-[10px] text-emerald-700 font-bold font-mono">5 Cols</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setIsToolsMenuOpen(false);
+                      const targetBank = selectedBank !== 'ALL' ? selectedBank : '';
+                      const proof = calculateProofOfCash(transactions, targetBank, currency, initialBalanceBank, initialBalanceLedger);
+                      exportToReconciliationProofExcel({
+                        proof,
+                        company: company || { companyName: 'EMPRESA CONTRIBUYENTE C.A.', companyRif: 'J-00000000-0', bcvRate, isSpecialTaxpayer: true } as any,
+                        transactions,
+                        currency
+                      });
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-teal-50 text-slate-800 font-medium flex items-center justify-between cursor-pointer border-t border-slate-100"
+                  >
+                    <div className="flex items-center gap-2">
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-teal-600" />
+                      <span className="font-bold text-teal-900">📗 Descargar Cuadre Conciliación (Excel)</span>
+                    </div>
+                    <span className="px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-800 text-[10px] font-bold">
+                      Portada • Cuadre
+                    </span>
+                  </button>
 
                   <button
                     onClick={() => {
@@ -1860,7 +1946,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                   className="w-full p-3 text-xs font-mono rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-emerald-400 focus:outline-none"
                 />
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Reconoce fechas (DD/MM/AAAA), números de comprobante o cheque, descripciones y montos Debe / Haber.
+                  Reconoce fechas (DD/MM/AAAA), números de comprobante o cheque/transferencia, descripciones y montos Debe / Haber.
                 </p>
               </div>
 
@@ -1970,7 +2056,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                   </div>
                   <div className="p-2 rounded-lg bg-white border border-slate-200">
                     <strong className="text-slate-800 block">Referencia:</strong>
-                    <span className="text-slate-500">N° de cheque/transf.</span>
+                    <span className="text-slate-500">N° de cheque/transferencia</span>
                   </div>
                   <div className="p-2 rounded-lg bg-white border border-slate-200">
                     <strong className="text-slate-800 block">Concepto:</strong>
@@ -1995,7 +2081,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                   <strong>Sí para las comisiones, IGTF y cargos directos del banco:</strong> Como el banco ya debitó esos montos de tu dinero real, tu empresa debe elaborar un asiento contable de ajuste cargando a <em>Gastos Bancarios (6.1.04)</em> y abonando a <em>Banco (1.1.01)</em>.
                 </p>
                 <p className="text-[11px] leading-relaxed">
-                  <strong>No para los cheques y depósitos en tránsito:</strong> Esos están bien anotados en tus libros; simplemente el banco los liquidará después.
+                  <strong>No para los cheques / transferencias y depósitos en tránsito:</strong> Esos están bien anotados en tus libros; simplemente el banco los liquidará después.
                 </p>
               </div>
             </div>
@@ -2075,6 +2161,17 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
         companyId={company?.id}
         onSave={handleSaveTransactionInternal}
         onDelete={handleDeleteTransactionInternal}
+      />
+
+      {/* MODAL DE REGLAS DE CONTABILIDAD BANCARIA POR BANCO (BDV, MERCANTIL, PLAZA) */}
+      <BankAccountingRulesModal
+        isOpen={isBankRulesModalOpen}
+        onClose={() => setIsBankRulesModalOpen(false)}
+        transactions={transactions}
+        currency={currency}
+        company={company}
+        initialBankCode={selectedBank !== 'ALL' ? selectedBank : '0102'}
+        onUpdateTransactions={onUpdateTransactions}
       />
 
     </div>

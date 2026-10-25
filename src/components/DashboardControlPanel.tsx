@@ -19,7 +19,8 @@ import {
   ShieldCheck,
   HelpCircle,
   Zap,
-  History
+  History,
+  BookOpen
 } from 'lucide-react';
 import { BankTransaction, CurrencyType, ProofOfCash } from '../types/accounting';
 
@@ -36,7 +37,8 @@ export type AppModuleId =
   | 'JUSTIFICATION_MODULES'
   | 'LEGAL_CONTRACTS'
   | 'AUDIT_VAULT'
-  | 'ERP_EXPORT';
+  | 'ERP_EXPORT'
+  | 'BANK_RULES';
 
 interface DashboardControlPanelProps {
   activeModule: AppModuleId;
@@ -263,6 +265,20 @@ export const DashboardControlPanel: React.FC<DashboardControlPanelProps> = ({
       icon: Download,
       iconColor: 'text-emerald-700',
       iconBg: 'bg-emerald-100/90'
+    },
+    {
+      id: 'BANK_RULES' as AppModuleId,
+      title: 'Reglas de Bancos (BDV, Banesco, Bancamiga, Mercantil, Plaza)',
+      subtitle: 'SGT Contable • Libro 3 Hojas Excel',
+      badge: '5 Columnas Exactas',
+      badgeColor: 'bg-purple-100 text-purple-900 border-purple-200 font-bold',
+      bgColor: 'bg-[#FAF5FF]',
+      borderColor: 'border-purple-200/80',
+      hoverBorder: 'hover:border-purple-400',
+      activeRing: 'ring-2 ring-purple-500/70 border-purple-500',
+      icon: BookOpen,
+      iconColor: 'text-purple-700',
+      iconBg: 'bg-purple-100/90'
     }
   ];
 

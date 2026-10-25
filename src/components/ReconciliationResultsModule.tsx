@@ -24,7 +24,9 @@ import {
   Copy,
   ExternalLink,
   Wand2,
-  History
+  History,
+  FolderCheck,
+  FolderOpen
 } from 'lucide-react';
 import {
   BankTransaction,
@@ -36,6 +38,7 @@ import { VENEZUELAN_BANKS } from '../data/venNifAccounts';
 import { calculateProofOfCash, runAutomatedReconciliation, runAutomatedReconciliationAsync } from '../services/matchingEngine';
 import { SuggestedAdjustmentsAssistant } from './SuggestedAdjustmentsAssistant';
 import { generateSuggestedAdjustments } from '../services/adjustmentEngine';
+import { processBankStatementForJustification } from '../services/justificationPipeline';
 
 interface ReconciliationResultsModuleProps {
   transactions: BankTransaction[];
@@ -51,6 +54,7 @@ interface ReconciliationResultsModuleProps {
   onNavigateToWorkspace: () => void;
   onNavigateToAssistant: (mode: 'BANK' | 'LEDGER') => void;
   onOpenProofModal: () => void;
+  onNavigateToJustification?: () => void;
 }
 
 export const ReconciliationResultsModule: React.FC<ReconciliationResultsModuleProps> = ({
@@ -66,7 +70,8 @@ export const ReconciliationResultsModule: React.FC<ReconciliationResultsModulePr
   onUpdateTransactions,
   onNavigateToWorkspace,
   onNavigateToAssistant,
-  onOpenProofModal
+  onOpenProofModal,
+  onNavigateToJustification
 }) => {
   const [selectedBank, setSelectedBank] = useState<string>('0134'); // Banesco default
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'ADJUSTMENTS' | 'WHAT_TO_TAKE' | 'ACTION_PLAN'>('OVERVIEW');
@@ -75,6 +80,24 @@ export const ReconciliationResultsModule: React.FC<ReconciliationResultsModulePr
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
   const sym = currency === 'VES' ? 'Bs.' : '$';
+
+  // Transferencia de TODO el estado de cuenta a Justificación Contable, Tributaria y Carpeta de Huérfanos
+  const handleTransferToJustification = () => {
+    const { updatedTransactions, summary } = processBankStatementForJustification(
+      transactions,
+      currency,
+      bcvRate
+    );
+    onUpdateTransactions(updatedTransactions);
+    setActionFeedback(
+      `¡Estado de cuenta transferido exitosamente! ${summary.totalBankItems} partidas analizadas (${summary.classifiedStandardCount} clasificadas en módulos y ${summary.orphansCount} agrupadas en la Carpeta de Huérfanos para cargar soportes).`
+    );
+    if (onNavigateToJustification) {
+      setTimeout(() => {
+        onNavigateToJustification();
+      }, 700);
+    }
+  };
 
   // Computed proposed adjustments count
   const pendingAdjustments = useMemo(() => {
@@ -276,6 +299,15 @@ export const ReconciliationResultsModule: React.FC<ReconciliationResultsModulePr
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
 
+            <button
+              onClick={handleTransferToJustification}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+              title="Pasar Estado de Cuenta al Módulo de Justificación y Carpeta de Huérfanos"
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-cyan-200" />
+              <span>Justificación & Huérfanos</span>
+            </button>
+
             {onOpenRestoreModal && (
               <button
                 onClick={onOpenRestoreModal}
@@ -402,6 +434,32 @@ export const ReconciliationResultsModule: React.FC<ReconciliationResultsModulePr
                     className="px-4 py-1.5 rounded-xl bg-white text-emerald-900 font-bold text-xs hover:bg-emerald-50 shadow-xs cursor-pointer transition-colors"
                   >
                     Ver Cédula de 4 Columnas Formal →
+                  </button>
+                </div>
+
+                {/* BANNER DE TRANSFERENCIA A JUSTIFICACIÓN CONTABLE, SENIAT Y CARPETA DE HUÉRFANOS */}
+                <div className="mt-4 p-4 rounded-2xl bg-white/15 border border-white/30 backdrop-blur-sm flex flex-col md:flex-row md:items-center justify-between gap-3 text-white">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-400 text-slate-950 font-black text-[10px] uppercase tracking-wide">
+                        Paso Siguiente Obligatorio
+                      </span>
+                      <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                        <FolderCheck className="w-4 h-4 text-emerald-200" />
+                        Justificación Contable, Fiscal y Repositorio de Soportes
+                      </h4>
+                    </div>
+                    <p className="text-xs text-emerald-50 leading-relaxed max-w-2xl">
+                      Para cumplir con Ven-NIF y SENIAT, <strong>debe justificarse el 100% del estado de cuenta bancario</strong>. Pasa las partidas a las 15 clasificaciones contables y envía todo lo que no encaje a la <strong>Carpeta de Huérfanos</strong> para saber cuáles son (entradas o salidas) y cargarles sus soportes probatorios (fotos/PDFs).
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={handleTransferToJustification}
+                    className="px-5 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs shadow-lg cursor-pointer transition-all flex items-center justify-center gap-2 shrink-0 border border-emerald-300"
+                  >
+                    <FolderOpen className="w-4 h-4 text-emerald-400" />
+                    <span>📁 Pasar Datos a Justificación y Soportes (1 Clic) →</span>
                   </button>
                 </div>
               </div>
@@ -616,7 +674,7 @@ export const ReconciliationResultsModule: React.FC<ReconciliationResultsModulePr
                 </span>
                 <TrendingUp className="w-4 h-4 text-sky-600" />
               </div>
-              <h4 className="text-xs font-bold text-slate-800 mt-2">Depósitos y Cheques en Tránsito</h4>
+              <h4 className="text-xs font-bold text-slate-800 mt-2">Depósitos y Cheques / Transferencias en Tránsito</h4>
               <div className="mt-1 flex items-baseline justify-between">
                 <span className="text-lg font-bold text-sky-900 font-mono">
                   {sym} {totalInTransit.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
@@ -761,7 +819,7 @@ export const ReconciliationResultsModule: React.FC<ReconciliationResultsModulePr
                 {expandedSection === 'TRANSIT' && (
                   (depositsInTransit.length === 0 && outstandingChecks.length === 0) ? (
                     <div className="p-6 text-center text-xs text-slate-500">
-                      No hay depósitos ni cheques en tránsito registrados.
+                      No hay depósitos ni cheques / transferencias en tránsito registrados.
                     </div>
                   ) : (
                     [...depositsInTransit, ...outstandingChecks].map(tx => (
@@ -773,7 +831,7 @@ export const ReconciliationResultsModule: React.FC<ReconciliationResultsModulePr
                               Ref: {tx.referenceNum}
                             </span>
                             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-50 text-sky-700">
-                              {tx.txType === 'CREDIT' ? 'Depósito en Tránsito (+)' : 'Cheque Pendiente Cobro (-)'}
+                              {tx.txType === 'CREDIT' ? 'Depósito en Tránsito (+)' : 'Cheque / Transferencia Pendiente Cobro (-)'}
                             </span>
                           </div>
                           <p className="text-[11px] text-slate-600">{tx.rawDescription}</p>
@@ -866,7 +924,7 @@ export const ReconciliationResultsModule: React.FC<ReconciliationResultsModulePr
                     <span className="font-bold">+{sym} {proof.depositsInTransit.toLocaleString('es-VE', { minimumFractionDigits: 2 })}</span>
                   </div>
                   <div className="flex justify-between text-rose-700">
-                    <span>(-) Cheques Girados no Cobrados:</span>
+                    <span>(-) Cheques / Transferencias Pendientes de Cobro:</span>
                     <span className="font-bold">-{sym} {proof.outstandingChecks.toLocaleString('es-VE', { minimumFractionDigits: 2 })}</span>
                   </div>
                   <div className="border-t border-slate-300 pt-2 flex justify-between text-slate-900 font-bold text-sm bg-sky-50/80 p-2 rounded-lg">
@@ -973,7 +1031,7 @@ export const ReconciliationResultsModule: React.FC<ReconciliationResultsModulePr
                 <span>¿Qué es exactamente el "Libro Contable de Banco"?</span>
               </h4>
               <p className="text-xs text-slate-600 leading-relaxed pl-8">
-                Es el <strong>Mayor Analítico</strong> de tu cuenta bancaria (por ejemplo la cuenta <code>1.1.01.02.001 - Banesco Cta Corriente</code>) que extraes de tu sistema administrativo o contable: <strong>Profit Plus, Gálac, Saint, SAP, Valery, o tu propio archivo de Excel</strong> donde anotas los cheques, transferencias emitidas y cobros.
+                Es el <strong>Mayor Analítico</strong> de tu cuenta bancaria (por ejemplo la cuenta <code>1.1.01.02.001 - Banesco Cta Corriente</code>) que extraes de tu sistema administrativo o contable: <strong>Profit Plus, Gálac, Saint, SAP, Valery, o tu propio archivo de Excel</strong> donde anotas los cheques / transferencias bancarias emitidas y cobros.
               </p>
             </div>
 
@@ -1022,7 +1080,7 @@ export const ReconciliationResultsModule: React.FC<ReconciliationResultsModulePr
                     <strong>Comisiones bancarias, IGTF (0.75% / 3%), intereses y retenciones del punto de venta:</strong> El banco ya te debitó ese dinero de tu cuenta. Por lo tanto, <strong>tu empresa tiene la obligación de registrar un asiento de gasto en su Libro Diario</strong> para que tu contabilidad refleje la realidad.
                   </li>
                   <li>
-                    <strong>Depósitos en tránsito o cheques no cobrados:</strong> <strong>NO los toques en tus libros.</strong> Tu registro contable está perfecto; simplemente el banco tardará unas horas o días en procesarlo.
+                    <strong>Depósitos en tránsito o cheques / transferencias no cobradas:</strong> <strong>NO los toques en tus libros.</strong> Tu registro contable está perfecto; simplemente el banco tardará unas horas o días en procesarlo.
                   </li>
                 </ul>
               </div>

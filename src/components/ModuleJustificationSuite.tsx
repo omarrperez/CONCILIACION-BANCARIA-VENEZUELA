@@ -42,6 +42,7 @@ import {
 } from '../types/accounting';
 import { RECONCILIATION_MODULES } from '../data/venNifAccounts';
 import { categorizeTransactionRuleBased } from '../services/aiAccountant';
+import { processBankStatementForJustification } from '../services/justificationPipeline';
 import { TelegramSyncControl } from './TelegramSyncControl';
 
 interface ModuleJustificationSuiteProps {
@@ -52,6 +53,8 @@ interface ModuleJustificationSuiteProps {
   selectedTxForJustification?: BankTransaction | null;
   onAssignModule: (txId: string, moduleTag: string, notes: string) => void;
   onUpdateTransactions?: (updated: BankTransaction[]) => void;
+  onNavigateToSeniatTax?: () => void;
+  onNavigateToAuditVault?: () => void;
 }
 
 // Compute simple SHA-256 hash representation for forensic evidence
@@ -73,12 +76,15 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
   bcvRate,
   selectedTxForJustification,
   onAssignModule,
-  onUpdateTransactions
+  onUpdateTransactions,
+  onNavigateToSeniatTax,
+  onNavigateToAuditVault
 }) => {
   const [selectedModuleId, setSelectedModuleId] = useState<string>(
     selectedTxForJustification?.moduleTag || 'MOD_VENTAS'
   );
   const [activeFilterType, setActiveFilterType] = useState<'ALL' | 'INFLOW' | 'OUTFLOW'>('ALL');
+  const [orphanFilterType, setOrphanFilterType] = useState<'ALL' | 'INFLOW' | 'OUTFLOW'>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedTxIdForAttach, setSelectedTxIdForAttach] = useState<string>('');
   const [previewAttachment, setPreviewAttachment] = useState<DigitalSupportAttachment | null>(null);
@@ -89,38 +95,74 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sym = currency === 'VES' ? 'Bs.' : '$';
 
-  // Bank transactions filtered to current currency
+  // Bank transactions filtered to current currency (TODO el estado de cuenta bancario)
   const bankTransactions = useMemo(() => {
     return transactions.filter(t => t.source === 'BANK' && t.currency === currency);
   }, [transactions, currency]);
 
-  // Group transactions by moduleTag
+  // Group transactions by moduleTag (con Carpeta de Huérfanos como destino de todo lo no clasificado)
   const transactionsByModule = useMemo(() => {
     const map: Record<string, BankTransaction[]> = {};
     for (const mod of RECONCILIATION_MODULES) {
       map[mod.id] = [];
     }
-    // Also include MOD_OTROS fallback
-    if (!map['MOD_OTROS']) map['MOD_OTROS'] = [];
+    if (!map['MOD_HUERFANOS']) map['MOD_HUERFANOS'] = [];
 
     for (const tx of bankTransactions) {
-      const tag = tx.moduleTag && map[tx.moduleTag] ? tx.moduleTag : 'MOD_OTROS';
+      let tag = tx.moduleTag;
+      // Normalizar huérfanos o sin clasificar
+      if (!tag || tag === 'MOD_OTROS' || tag === 'MOD_HUERFANOS' || !map[tag]) {
+        tag = 'MOD_HUERFANOS';
+      }
       map[tag].push(tx);
     }
     return map;
   }, [bankTransactions]);
 
+  // Estadísticas globales de TODO el Estado de Cuenta Bancario
+  const globalBankStats = useMemo(() => {
+    const totalCount = bankTransactions.length;
+    const totalAmount = bankTransactions.reduce((acc, t) => acc + t.amountNominal, 0);
+    const withSupportCount = bankTransactions.filter(t => t.attachments && t.attachments.length > 0).length;
+    const orphansList = transactionsByModule['MOD_HUERFANOS'] || [];
+    const orphansCount = orphansList.length;
+    const orphansAmount = orphansList.reduce((acc, t) => acc + t.amountNominal, 0);
+    const orphanInflowsCount = orphansList.filter(t => t.txType === 'CREDIT').length;
+    const orphanOutflowsCount = orphansList.filter(t => t.txType === 'DEBIT').length;
+    const classifiedCount = totalCount - orphansCount;
+    const coveragePercent = totalCount > 0 ? Math.round((withSupportCount / totalCount) * 100) : 0;
+
+    return {
+      totalCount,
+      totalAmount,
+      withSupportCount,
+      orphansCount,
+      orphansAmount,
+      orphanInflowsCount,
+      orphanOutflowsCount,
+      classifiedCount,
+      coveragePercent
+    };
+  }, [bankTransactions, transactionsByModule]);
+
   // All attachments in current category (from transactions + category-wide)
   const currentCategoryTxs = useMemo(() => {
     const txs = transactionsByModule[selectedModuleId] || [];
-    if (!searchTerm.trim()) return txs;
+    
+    // Si estamos en la Carpeta de Huérfanos, aplicar el filtro de Entradas/Salidas
+    let filtered = txs;
+    if (selectedModuleId === 'MOD_HUERFANOS' && orphanFilterType !== 'ALL') {
+      filtered = filtered.filter(t => orphanFilterType === 'INFLOW' ? t.txType === 'CREDIT' : t.txType === 'DEBIT');
+    }
+
+    if (!searchTerm.trim()) return filtered;
     const term = searchTerm.toLowerCase();
-    return txs.filter(t =>
+    return filtered.filter(t =>
       t.rawDescription.toLowerCase().includes(term) ||
       t.referenceNum.toLowerCase().includes(term) ||
       (t.counterpartyRif && t.counterpartyRif.toLowerCase().includes(term))
     );
-  }, [transactionsByModule, selectedModuleId, searchTerm]);
+  }, [transactionsByModule, selectedModuleId, searchTerm, orphanFilterType]);
 
   // Collect all attachments from current category transactions
   const currentCategoryAttachments = useMemo(() => {
@@ -136,10 +178,10 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
 
   const activeModuleMeta = useMemo(() => {
     return RECONCILIATION_MODULES.find(m => m.id === selectedModuleId) || {
-      id: 'MOD_OTROS',
-      title: 'Otros / No Identificados',
+      id: 'MOD_HUERFANOS',
+      title: 'Carpeta de Huérfanos (Sin Clasificar / Pendientes)',
       type: 'ALL',
-      description: 'Partidas no clasificadas automáticamente que requieren revisión contable o soporte probatorio.'
+      description: 'Todo movimiento del banco (entrada o salida de dinero) que no encaja en las 15 clasificaciones operativas, para saber cuáles son y cargarles sus soportes probatorios.'
     };
   }, [selectedModuleId]);
 
@@ -230,35 +272,21 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
     setTimeout(() => setSuccessMsg(null), 2500);
   };
 
-  // Auto-classify all transactions based on Venezuelan accounting rules
+  // Auto-classify all transactions based on Venezuelan accounting rules and route unclassified to Carpeta de Huérfanos
   const handleAutoClassifyAll = () => {
     if (!onUpdateTransactions) return;
 
-    let changedCount = 0;
-    const updated = transactions.map(t => {
-      // If already has a valid moduleTag other than MOD_OTROS, preserve it
-      if (t.moduleTag && t.moduleTag !== 'MOD_OTROS') return t;
+    const { updatedTransactions, summary } = processBankStatementForJustification(
+      transactions,
+      currency,
+      bcvRate
+    );
 
-      const rule = categorizeTransactionRuleBased(
-        t.rawDescription,
-        t.amountNominal,
-        t.txType,
-        t.currency,
-        t.bankName
-      );
-
-      changedCount++;
-      return {
-        ...t,
-        moduleTag: rule.moduleTag,
-        accountCode: rule.accountCode,
-        accountName: rule.accountName
-      };
-    });
-
-    onUpdateTransactions(updated);
-    setSuccessMsg(`¡Clasificación automática completada! Se asignaron ${changedCount} transacciones a sus módulos correspondientes.`);
-    setTimeout(() => setSuccessMsg(null), 4000);
+    onUpdateTransactions(updatedTransactions);
+    setSuccessMsg(
+      `¡Procesado todo el estado de cuenta! ${summary.classifiedStandardCount} partidas clasificadas en módulos contables y ${summary.orphansCount} agrupadas en la Carpeta de Huérfanos para cargar sus soportes.`
+    );
+    setTimeout(() => setSuccessMsg(null), 5000);
   };
 
   // Remove an attachment
@@ -294,7 +322,8 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
       case 'MOD_NOMINA': return Briefcase;
       case 'MOD_SENIAT_PAGO': return Building2;
       case 'MOD_COMISIONES': return Landmark;
-      case 'MOD_OTROS': return HelpCircle;
+      case 'MOD_HUERFANOS': return AlertCircle;
+      case 'MOD_OTROS': return AlertCircle;
       default: return ShieldCheck;
     }
   };
@@ -325,7 +354,7 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
             Módulo de Justificación Contable, Tributaria y Repositorio de Soportes
           </h2>
           <p className="text-xs text-cyan-100/80 max-w-2xl leading-relaxed">
-            Organiza las transacciones bancarias en sus categorías exactas y carga los soportes digitales (fotos de transferencias, capturas de Pago Móvil, facturas y comprobantes PDF) para blindar la empresa ante cualquier fiscalización o auditoría.
+            Debe justificarse <strong>TODO el estado de cuenta bancario</strong> (entradas y salidas de dinero). Cada movimiento se clasifica en sus categorías contables; todo lo que no encaje en las 15 clasificaciones se resguarda en la <strong>Carpeta de Huérfanos</strong> para cargar sus soportes probatorios.
           </p>
         </div>
 
@@ -341,11 +370,141 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
           />
           <button
             onClick={handleAutoClassifyAll}
-            className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs shadow-md flex items-center gap-2 cursor-pointer transition-all shrink-0"
+            className="px-4 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black text-xs shadow-md flex items-center gap-2 cursor-pointer transition-all shrink-0 hover:scale-[1.02] active:scale-[0.98]"
+            title="Clasificar automáticamente todo el estado de cuenta bancario y enviar partidas no reconocidas a la Carpeta de Huérfanos"
           >
-            <Sparkles className="w-4 h-4" />
-            <span>Auto-Clasificar</span>
+            <Sparkles className="w-4 h-4 fill-slate-950" />
+            <span>Clasificar Todo el Estado de Cuenta</span>
           </button>
+        </div>
+      </div>
+
+      {/* Resumen de Justificación de TODO el Estado de Cuenta Bancario */}
+      <div className="bg-white p-5 rounded-3xl border border-slate-200/90 shadow-2xs space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                Auditoría Integral del Extracto
+              </span>
+              <h3 className="text-sm font-black text-slate-900">
+                Estado de Justificación de TODO el Estado de Cuenta Bancario
+              </h3>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Supervisión de cada débito y crédito bancario para blindaje tributario SENIAT y probatorio contable.
+            </p>
+          </div>
+
+          {/* Quick Module Navigation Links */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {globalBankStats.orphansCount > 0 && (
+              <button
+                type="button"
+                onClick={() => { setSelectedModuleId('MOD_HUERFANOS'); setSearchTerm(''); }}
+                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs shadow-xs cursor-pointer transition-all flex items-center gap-1.5 animate-pulse"
+              >
+                <AlertCircle className="w-3.5 h-3.5" />
+                <span>Ver Carpeta de Huérfanos ({globalBankStats.orphansCount})</span>
+              </button>
+            )}
+
+            {onNavigateToSeniatTax && (
+              <button
+                type="button"
+                onClick={onNavigateToSeniatTax}
+                className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs border border-slate-200 transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <Building2 className="w-3.5 h-3.5 text-teal-600" />
+                <span>Módulo SENIAT Fiscal →</span>
+              </button>
+            )}
+
+            {onNavigateToAuditVault && (
+              <button
+                type="button"
+                onClick={onNavigateToAuditVault}
+                className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs border border-slate-200 transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Bóveda SHA-256 →</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* 4 KPI Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80">
+            <span className="text-[10px] text-slate-500 font-bold uppercase block">Total Estado de Cuenta</span>
+            <div className="flex items-baseline gap-1.5 mt-1">
+              <strong className="text-base font-black text-slate-900 font-mono">
+                {globalBankStats.totalCount}
+              </strong>
+              <span className="text-slate-500 font-medium">partidas</span>
+            </div>
+            <span className="text-[11px] text-slate-600 font-mono block mt-0.5 font-semibold truncate">
+              {sym} {globalBankStats.totalAmount.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-cyan-50/70 border border-cyan-200/80">
+            <span className="text-[10px] text-cyan-800 font-bold uppercase block">Clasificadas en Módulos</span>
+            <div className="flex items-baseline gap-1.5 mt-1">
+              <strong className="text-base font-black text-cyan-950 font-mono">
+                {globalBankStats.classifiedCount}
+              </strong>
+              <span className="text-cyan-800 font-medium">de {globalBankStats.totalCount}</span>
+            </div>
+            <span className="text-[11px] text-cyan-700 font-medium block mt-0.5">
+              15 categorías operativas
+            </span>
+          </div>
+
+          <div className={`p-3.5 rounded-2xl border transition-all ${
+            globalBankStats.orphansCount > 0
+              ? 'bg-amber-50 border-amber-300 ring-2 ring-amber-200'
+              : 'bg-emerald-50/70 border-emerald-200/80'
+          }`}>
+            <span className={`text-[10px] font-bold uppercase block ${
+              globalBankStats.orphansCount > 0 ? 'text-amber-900' : 'text-emerald-800'
+            }`}>
+              Carpeta de Huérfanos
+            </span>
+            <div className="flex items-baseline gap-1.5 mt-1">
+              <strong className={`text-base font-black font-mono ${
+                globalBankStats.orphansCount > 0 ? 'text-amber-950' : 'text-emerald-950'
+              }`}>
+                {globalBankStats.orphansCount}
+              </strong>
+              <span className={globalBankStats.orphansCount > 0 ? 'text-amber-800 font-medium' : 'text-emerald-800 font-medium'}>
+                por justificar
+              </span>
+            </div>
+            <span className={`text-[11px] font-mono block mt-0.5 font-bold truncate ${
+              globalBankStats.orphansCount > 0 ? 'text-amber-900' : 'text-emerald-700'
+            }`}>
+              {globalBankStats.orphansCount > 0
+                ? `${sym} ${globalBankStats.orphansAmount.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`
+                : '✓ Sin huérfanos'}
+            </span>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-200/80">
+            <span className="text-[10px] text-emerald-800 font-bold uppercase block">Soportes Probatorios</span>
+            <div className="flex items-baseline gap-1.5 mt-1">
+              <strong className="text-base font-black text-emerald-950 font-mono">
+                {globalBankStats.withSupportCount} / {globalBankStats.totalCount}
+              </strong>
+              <span className="text-emerald-800 font-bold text-xs">({globalBankStats.coveragePercent}%)</span>
+            </div>
+            <div className="w-full bg-emerald-200 rounded-full h-1.5 mt-1.5 overflow-hidden">
+              <div
+                className="bg-emerald-600 h-1.5 rounded-full transition-all"
+                style={{ width: `${globalBankStats.coveragePercent}%` }}
+              />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -413,7 +572,7 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
               const total = txs.reduce((acc, t) => acc + t.amountNominal, 0);
               const withSupport = txs.filter(t => t.attachments && t.attachments.length > 0).length;
 
-              const isOtros = mod.id === 'MOD_OTROS';
+              const isOrphanMod = mod.id === 'MOD_HUERFANOS' || mod.id === 'MOD_OTROS';
 
               return (
                 <div
@@ -421,30 +580,43 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
                   onClick={() => { setSelectedModuleId(mod.id); setSearchTerm(''); }}
                   className={`p-3 rounded-2xl border transition-all cursor-pointer text-xs space-y-1.5 ${
                     isSelected
-                      ? 'border-cyan-500 bg-cyan-50/70 ring-2 ring-cyan-200 shadow-2xs'
-                      : isOtros
-                      ? 'border-amber-200 bg-amber-50/40 hover:bg-amber-50/70'
+                      ? isOrphanMod
+                        ? 'border-amber-500 bg-amber-50/90 ring-2 ring-amber-300 shadow-sm'
+                        : 'border-cyan-500 bg-cyan-50/70 ring-2 ring-cyan-200 shadow-2xs'
+                      : isOrphanMod
+                      ? 'border-amber-300/80 bg-gradient-to-r from-amber-50/70 to-orange-50/60 hover:bg-amber-100/80 shadow-2xs'
                       : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/60'
                   }`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 ${
-                        isOtros
-                          ? 'bg-amber-100 text-amber-800'
+                        isOrphanMod
+                          ? 'bg-amber-500 text-white shadow-2xs'
                           : mod.type === 'INFLOW'
                           ? 'bg-emerald-100 text-emerald-800'
                           : 'bg-rose-100 text-rose-800'
                       }`}>
                         <Icon className="w-3.5 h-3.5" />
                       </div>
-                      <span className="font-bold text-slate-900 leading-tight block">
-                        {mod.title}
-                      </span>
+                      <div>
+                        <span className="font-bold text-slate-900 leading-tight block">
+                          {mod.title}
+                        </span>
+                        {isOrphanMod && (
+                          <span className="text-[9px] font-black uppercase text-amber-700 block tracking-tight">
+                            Entradas y Salidas sin Clasificar
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      count > 0 ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-400'
+                      isOrphanMod && count > 0
+                        ? 'bg-amber-600 text-white font-black animate-pulse'
+                        : count > 0
+                        ? 'bg-slate-900 text-white'
+                        : 'bg-slate-100 text-slate-400'
                     }`}>
                       {count} {count === 1 ? 'partida' : 'partidas'}
                     </span>
@@ -460,7 +632,7 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
                     </span>
 
                     <span className={`font-semibold flex items-center gap-1 ${
-                      withSupport > 0 ? 'text-emerald-700' : (count > 0 ? 'text-amber-700' : 'text-slate-400')
+                      withSupport > 0 ? 'text-emerald-700' : (count > 0 ? 'text-amber-700 font-bold' : 'text-slate-400')
                     }`}>
                       {withSupport > 0 ? (
                         <>
@@ -468,7 +640,7 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
                           <span>{withSupport} con soporte</span>
                         </>
                       ) : count > 0 ? (
-                        <span>Sin soporte</span>
+                        <span>{isOrphanMod ? '⚠️ Sin soporte' : 'Sin soporte'}</span>
                       ) : (
                         <span>0 soportes</span>
                       )}
@@ -490,8 +662,8 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
               <div className="flex items-center gap-3">
                 <div className={`w-11 h-11 rounded-2xl flex items-center justify-center text-white shadow-xs ${
-                  activeModuleMeta.id === 'MOD_OTROS'
-                    ? 'bg-amber-600'
+                  activeModuleMeta.id === 'MOD_HUERFANOS' || activeModuleMeta.id === 'MOD_OTROS'
+                    ? 'bg-amber-600 ring-4 ring-amber-100'
                     : activeModuleMeta.type === 'INFLOW'
                     ? 'bg-emerald-600'
                     : 'bg-rose-600'
@@ -503,8 +675,18 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
                     <h3 className="text-base font-bold text-slate-900">
                       {activeModuleMeta.title}
                     </h3>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
-                      {activeModuleMeta.type === 'INFLOW' ? 'Entrada al Banco' : (activeModuleMeta.type === 'OUTFLOW' ? 'Salida del Banco' : 'Especial')}
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      activeModuleMeta.id === 'MOD_HUERFANOS'
+                        ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                        : activeModuleMeta.type === 'INFLOW'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-rose-100 text-rose-800'
+                    }`}>
+                      {activeModuleMeta.id === 'MOD_HUERFANOS'
+                        ? 'Entradas (+) y Salidas (-) por Justificar'
+                        : activeModuleMeta.type === 'INFLOW'
+                        ? 'Entrada al Banco'
+                        : 'Salida del Banco'}
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 mt-0.5">
@@ -536,6 +718,64 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
                 </div>
               </div>
             </div>
+
+            {/* AVISO EXCLUSIVO Y FILTROS RÁPIDOS DE CARPETA DE HUÉRFANOS */}
+            {(activeModuleMeta.id === 'MOD_HUERFANOS' || activeModuleMeta.id === 'MOD_OTROS') && (
+              <div className="bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-500/5 p-4 rounded-2xl border border-amber-300/80 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-black text-[10px] uppercase tracking-wider">
+                        Atención Requerida • 100% del Extracto
+                      </span>
+                      <span className="text-xs font-bold text-amber-950">
+                        {globalBankStats.orphansCount} movimientos bancarios pendientes de clasificar o sustentar
+                      </span>
+                    </div>
+                    <p className="text-xs text-amber-900 leading-relaxed">
+                      De acuerdo con la normativa contable y fiscal (Ven-NIF / SENIAT), <strong>todo el estado de cuenta bancario debe justificarse</strong>. Aquí se concentran todas las partidas que no encajaron en las 15 clasificaciones contables estándar. Puedes revisar cuáles son <strong>entradas (+)</strong> o <strong>salidas (-)</strong>, cargar sus soportes fotográficos o en PDF, y reclasificarlas a su módulo respectivo.
+                    </p>
+                  </div>
+
+                  {/* Filtro Sub-categoría Huérfanos: Todas / Solo Entradas / Solo Salidas */}
+                  <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-amber-300 shrink-0 self-start md:self-center shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => setOrphanFilterType('ALL')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        orphanFilterType === 'ALL'
+                          ? 'bg-amber-600 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-amber-900'
+                      }`}
+                    >
+                      Todas ({transactionsByModule['MOD_HUERFANOS']?.length || 0})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOrphanFilterType('INFLOW')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        orphanFilterType === 'INFLOW'
+                          ? 'bg-emerald-600 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-emerald-800'
+                      }`}
+                    >
+                      + Entradas ({globalBankStats.orphanInflowsCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOrphanFilterType('OUTFLOW')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        orphanFilterType === 'OUTFLOW'
+                          ? 'bg-rose-600 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-rose-800'
+                      }`}
+                    >
+                      - Salidas ({globalBankStats.orphanOutflowsCount})
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* SECCIÓN A: REPOSITORIO DE SOPORTES DIGITALES (FOTOS Y PDFS) */}
             <div className="bg-slate-50/70 p-4 rounded-2xl border border-slate-200/80 space-y-3">
@@ -760,6 +1000,7 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
                       <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold text-slate-700">
                         <th className="p-3">Fecha</th>
                         <th className="p-3">Referencia</th>
+                        <th className="p-3 text-center">Tipo</th>
                         <th className="p-3">Concepto Extracto Bancario</th>
                         <th className="p-3 text-right">Monto ({sym})</th>
                         <th className="p-3 text-center">Soporte Digital</th>
@@ -769,6 +1010,7 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
                     <tbody className="divide-y divide-slate-100 font-mono">
                       {currentCategoryTxs.map(tx => {
                         const hasAttachments = tx.attachments && tx.attachments.length > 0;
+                        const isCredit = tx.txType === 'CREDIT';
 
                         return (
                           <tr key={tx.id} className="hover:bg-slate-50/80 transition-colors">
@@ -777,6 +1019,15 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
                             </td>
                             <td className="p-3 font-bold text-slate-900 whitespace-nowrap">
                               {tx.referenceNum}
+                            </td>
+                            <td className="p-3 text-center whitespace-nowrap font-sans">
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black ${
+                                isCredit
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                  : 'bg-rose-100 text-rose-800 border border-rose-300'
+                              }`}>
+                                {isCredit ? '+ Entrada' : '- Salida'}
+                              </span>
                             </td>
                             <td className="p-3 font-sans max-w-xs text-xs text-slate-800">
                               <span className="font-medium">{tx.rawDescription}</span>
@@ -787,9 +1038,9 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
                               )}
                             </td>
                             <td className={`p-3 text-right font-bold whitespace-nowrap ${
-                              tx.txType === 'CREDIT' ? 'text-emerald-700' : 'text-slate-900'
+                              isCredit ? 'text-emerald-700' : 'text-slate-900'
                             }`}>
-                              {tx.txType === 'DEBIT' ? '-' : '+'}
+                              {isCredit ? '+' : '-'}
                               {tx.amountNominal.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
                             </td>
                             
