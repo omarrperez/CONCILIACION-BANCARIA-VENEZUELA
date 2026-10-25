@@ -1,18 +1,51 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer, collection, getDocs, setDoc, updateDoc, deleteDoc, query, where, onSnapshot } from 'firebase/firestore';
-import rawAppletConfig from '../../firebase-applet-config.json';
+// Safe dynamic resolution of firebase-applet-config.json without failing Vite build on Netlify if file is missing
+const appletConfigModules = import.meta.glob(
+  [
+    '../../firebase-applet-config.json',
+    '../firebase-applet-config.json',
+    './firebase-applet-config.json',
+    '/firebase-applet-config.json'
+  ],
+  { eager: true, import: 'default' }
+) as Record<string, any>;
 
-const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || rawAppletConfig?.projectId || 'ai-studio-8e50d3b3-47bc-4226-b17c-67741752ed3c';
-const databaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || rawAppletConfig?.firestoreDatabaseId || 'ai-studio-8e50d3b3-47bc-4226-b17c-67741752ed3c';
+const rawAppletConfig = Object.values(appletConfigModules)[0] || {};
+
+const projectId =
+  import.meta.env.VITE_FIREBASE_PROJECT_ID ||
+  rawAppletConfig?.projectId ||
+  'nominus-venezuela-bancaria';
+
+const databaseId =
+  import.meta.env.VITE_FIREBASE_DATABASE_ID ||
+  rawAppletConfig?.firestoreDatabaseId ||
+  '(default)';
 
 const activeConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || rawAppletConfig?.apiKey || 'AIzaSyDummyApiKeyForStudioPreviewEnvironmentOnly12345',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || rawAppletConfig?.authDomain || `${projectId}.firebaseapp.com`,
+  apiKey:
+    import.meta.env.VITE_FIREBASE_API_KEY ||
+    rawAppletConfig?.apiKey ||
+    'AIzaSyDummyApiKeyForStudioPreviewEnvironmentOnly12345',
+  authDomain:
+    import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ||
+    rawAppletConfig?.authDomain ||
+    `${projectId}.firebaseapp.com`,
   projectId: projectId,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || rawAppletConfig?.storageBucket || `${projectId}.appspot.com`,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || rawAppletConfig?.messagingSenderId || '257746239607',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || rawAppletConfig?.appId || '1:257746239607:web:8e50d3b347bc4226b17c67',
+  storageBucket:
+    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ||
+    rawAppletConfig?.storageBucket ||
+    `${projectId}.appspot.com`,
+  messagingSenderId:
+    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ||
+    rawAppletConfig?.messagingSenderId ||
+    '257746239607',
+  appId:
+    import.meta.env.VITE_FIREBASE_APP_ID ||
+    rawAppletConfig?.appId ||
+    '1:257746239607:web:8e50d3b347bc4226b17c67',
   firestoreDatabaseId: databaseId,
 };
 
