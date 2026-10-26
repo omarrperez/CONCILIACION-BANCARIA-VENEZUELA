@@ -15,7 +15,9 @@ import {
   Search,
   Zap,
   Info,
-  ExternalLink
+  ExternalLink,
+  Copy,
+  FileText
 } from 'lucide-react';
 import {
   BankTransaction,
@@ -27,6 +29,7 @@ import {
   getBankRulesDefinition,
   classifyTransactionByBankRules,
   generateBankLedgerExcel,
+  generateBanescoAsientosExcel,
   BankRulesDefinition,
   BankRuleItem
 } from '../services/bankAccountingRules';
@@ -53,6 +56,8 @@ export const BankAccountingRulesModal: React.FC<BankAccountingRulesModalProps> =
   const [selectedBankCode, setSelectedBankCode] = useState<string>(initialBankCode);
   const [searchPattern, setSearchPattern] = useState<string>('');
   const [actionToast, setActionToast] = useState<string | null>(null);
+  const [showPromptView, setShowPromptView] = useState<boolean>(false);
+  const [copiedPrompt, setCopiedPrompt] = useState<boolean>(false);
 
   const activeBankDef = useMemo(() => {
     return getBankRulesDefinition(selectedBankCode);
@@ -107,7 +112,22 @@ export const BankAccountingRulesModal: React.FC<BankAccountingRulesModalProps> =
   // 1. Descarga del Libro de Bancos en Excel (3 Hojas con Partida Doble)
   const handleDownloadLedgerExcel = () => {
     generateBankLedgerExcel(transactions, selectedBankCode, company, currency);
-    showToast(`¡Libro de Bancos de ${activeBankDef.bankName} generado con éxito en Excel (3 Hojas con Partida Doble)!`);
+    if (selectedBankCode === '0134') {
+      showToast(`¡Archivo asientos_generados.xlsx descargado con éxito para Banesco con Hoja 1 (NC), Hoja 2 (ND) y Hoja 3 (ND + ND)!`);
+    } else if (selectedBankCode === '0102') {
+      showToast(`¡Archivo asientos_generados.xlsx descargado con éxito para Banco de Venezuela con Hoja 1 (NC), Hoja 2 (ND) y Hoja 3 (ND + ND)!`);
+    } else {
+      showToast(`¡Libro de Bancos de ${activeBankDef.bankName} generado con éxito en Excel (3 Hojas con Partida Doble)!`);
+    }
+  };
+
+  const handleCopyPrompt = () => {
+    if (activeBankDef.promptTemplate) {
+      navigator.clipboard.writeText(activeBankDef.promptTemplate);
+      setCopiedPrompt(true);
+      setTimeout(() => setCopiedPrompt(false), 3000);
+      showToast('¡Prompt oficial copiado al portapapeles!');
+    }
   };
 
   // 2. Aplicar las reglas del banco a las transacciones del estado de cuenta
@@ -140,10 +160,10 @@ export const BankAccountingRulesModal: React.FC<BankAccountingRulesModalProps> =
   };
 
   const bankOptions = [
-    { code: '0102', name: 'Banco de Venezuela', account: '1.1.1.2.30', color: 'rose' },
+    { code: '0102', name: 'Banco de Venezuela (asientos_generados)', account: '1.1.1.2.20', color: 'rose' },
     { code: '0105', name: 'Banco Mercantil', account: '1.1.1.2.60', color: 'blue' },
     { code: '0138', name: 'Banco Plaza', account: '1.1.1.2.10', color: 'emerald' },
-    { code: '0134', name: 'Banesco (SGT)', account: '1.1.1.2.10', color: 'amber' },
+    { code: '0134', name: 'Banesco (asientos_generados)', account: '1.1.1.2.10', color: 'amber' },
     { code: '0172', name: 'Bancamiga (Oficial)', account: '1.1.1.2.20', color: 'teal' },
     { code: '0191', name: 'BNC', account: '1.1.1.2.91', color: 'indigo' }
   ];
@@ -185,13 +205,28 @@ export const BankAccountingRulesModal: React.FC<BankAccountingRulesModalProps> =
           </div>
 
           <div className="flex items-center gap-2">
+            {activeBankDef.promptTemplate && (
+              <button
+                onClick={() => setShowPromptView(!showPromptView)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-xs transition-all cursor-pointer"
+                title={`Ver o copiar el Prompt Oficial de ${activeBankDef.bankName}`}
+              >
+                <FileText className="w-4 h-4" />
+                <span>{showPromptView ? 'Ocultar Prompt' : `📜 Prompt ${selectedBankCode === '0102' ? 'BDV' : selectedBankCode === '0134' ? 'Banesco' : 'Oficial'}`}</span>
+              </button>
+            )}
+
             <button
               onClick={handleDownloadLedgerExcel}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-xs transition-all cursor-pointer"
-              title="Descargar Libro de Bancos en Excel (3 Hojas con Partida Doble)"
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-white font-black text-xs shadow-xs transition-all cursor-pointer ${
+                selectedBankCode === '0134' || selectedBankCode === '0102'
+                  ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                  : 'bg-emerald-600 hover:bg-emerald-700'
+              }`}
+              title={(selectedBankCode === '0134' || selectedBankCode === '0102') ? `Descargar archivo asientos_generados.xlsx (3 Hojas ${activeBankDef.bankName})` : 'Descargar Libro de Bancos en Excel (3 Hojas con Partida Doble)'}
             >
               <Download className="w-4 h-4" />
-              <span>Descargar Libro en Excel (.XLSX)</span>
+              <span>{(selectedBankCode === '0134' || selectedBankCode === '0102') ? 'Descargar asientos_generados.xlsx' : 'Descargar Libro en Excel (.XLSX)'}</span>
             </button>
             <button
               onClick={onClose}
@@ -298,6 +333,122 @@ export const BankAccountingRulesModal: React.FC<BankAccountingRulesModalProps> =
 
         {/* Content: Scrollable Rules List */}
         <div className="p-5 overflow-y-auto space-y-4 flex-1">
+          {/* Card explicativa del Prompt Oficial (Banesco o Banco de Venezuela) */}
+          {Boolean(activeBankDef.promptTemplate) && (
+            <div className={`p-4 rounded-2xl border-2 shadow-2xs space-y-3 ${
+              selectedBankCode === '0102'
+                ? 'bg-rose-50/90 border-rose-300'
+                : 'bg-amber-50/90 border-amber-300'
+            }`}>
+              <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-2.5 ${
+                selectedBankCode === '0102' ? 'border-rose-200' : 'border-amber-200'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${
+                    selectedBankCode === '0102' ? 'bg-rose-600' : 'bg-amber-500'
+                  }`} />
+                  <h4 className={`text-xs font-black uppercase ${
+                    selectedBankCode === '0102' ? 'text-rose-950' : 'text-amber-950'
+                  }`}>
+                    Prompt Oficial Anexado: {activeBankDef.bankName} ({activeBankDef.bankCode})
+                  </h4>
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
+                    selectedBankCode === '0102' ? 'bg-rose-200 text-rose-900' : 'bg-amber-200 text-amber-900'
+                  }`}>
+                    asientos_generados.xlsx
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleCopyPrompt}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-white font-bold text-xs shadow-xs transition-all cursor-pointer ${
+                      selectedBankCode === '0102'
+                        ? 'bg-rose-700 hover:bg-rose-800 active:bg-rose-900'
+                        : 'bg-amber-600 hover:bg-amber-700 active:bg-amber-800'
+                    }`}
+                    title={`Copiar texto íntegro del prompt de ${activeBankDef.bankName} al portapapeles`}
+                  >
+                    {copiedPrompt ? <Check className="w-3.5 h-3.5 text-emerald-200" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedPrompt ? '¡Copiado!' : `Copiar Prompt Oficial (${selectedBankCode === '0102' ? 'BDV' : 'Banesco'})`}</span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowPromptView(!showPromptView)}
+                    className={`flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white border font-bold text-xs transition-all cursor-pointer shadow-2xs ${
+                      selectedBankCode === '0102'
+                        ? 'border-rose-300 hover:bg-rose-100 text-rose-950'
+                        : 'border-amber-300 hover:bg-amber-100 text-amber-950'
+                    }`}
+                  >
+                    <FileText className={`w-3.5 h-3.5 ${selectedBankCode === '0102' ? 'text-rose-700' : 'text-amber-700'}`} />
+                    <span>{showPromptView ? 'Cerrar Instrucciones' : 'Ver Texto del Prompt'}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className={`text-[11px] space-y-1.5 ${selectedBankCode === '0102' ? 'text-rose-950' : 'text-amber-950'}`}>
+                <p>
+                  <strong>Estructura técnica configurada para exportación en Excel (asientos_generados.xlsx):</strong>
+                </p>
+                {selectedBankCode === '0102' ? (
+                  <ul className="list-disc list-inside space-y-1 text-slate-700 pl-1">
+                    <li><strong>Hoja 1 (NC):</strong> Notas de crédito (montos positivos) asignadas a la cuenta <code>1.1.1.2.20</code> (Banco de Venezuela) y al final contrapartida <code>1.1.2.1.10</code> (Cuentas por cobrar) con ref <code>RES-[DD-MM-AAAA]</code> en negativo (suma = 0,00).</li>
+                    <li><strong>Hoja 2 (ND):</strong> Notas débito (montos negativos) clasificadas en positivo según Regla 1 (Comisiones <code>6.1.2.5.02</code>: <em>COM , COBRO COMISION, COMIS, COMISION PAGOMOVILBDV...</em>), Regla 2 (Compras/Servicios <code>2.1.1.1.10</code>: <em>PAGO A OTROS BANCOS 0115, PAGO A TERCEROS BDV...</em>) y Regla 3 (Socios <code>1.1.2.2.30</code>). Su contrapartida automática <code>1.1.1.2.20 / 1.1.1.2.40 BANCO VENEZUELA</code> en negativo (suma = 0,00).</li>
+                    <li><strong>Hoja 3 (ND + ND):</strong> Unificación de todas las transacciones de NC y ND con sus contrapartidas balanceadas a 0,00 exacto.</li>
+                    <li><strong>Validaciones:</strong> Encabezado obligatorio (CUENTA CONTABLE | DESCRIPCION | TIPO | REFERENCIA | MONTO), sin columna Fecha, 2 decimales y balance a 0,00 en cada una de las 3 hojas.</li>
+                  </ul>
+                ) : (
+                  <ul className="list-disc list-inside space-y-1 text-slate-700 pl-1">
+                    <li><strong>Hoja 1 (NC):</strong> Notas de crédito (montos positivos) cargadas a la cuenta <code>1.1.1.2.10</code> (Banesco) y al final contrapartida <code>1.1.2.1.10</code> (Cuentas por cobrar) con ref <code>RES-[DD-MM-AAAA]</code> en negativo (suma = 0,00).</li>
+                    <li><strong>Hoja 2 (ND):</strong> Notas débito (montos negativos) clasificadas en positivo según las 5 Reglas (Comisiones <code>6.1.2.5.02</code>, Compras <code>2.1.1.1.10</code>, Electricidad <code>6.1.2.1.20</code>, Nómina <code>2.1.3.2.10</code>, Impuestos IVA <code>2.1.2.2.20</code>) y su contrapartida <code>1.1.1.2.10 BANESCO</code> en negativo (suma = 0,00).</li>
+                    <li><strong>Hoja 3 (ND + ND):</strong> Unificación de todas las transacciones de NC y ND con sus contrapartidas balanceadas a 0,00 exacto.</li>
+                    <li><strong>Validaciones:</strong> Encabezado obligatorio (CUENTA CONTABLE | DESCRIPCION | TIPO | REFERENCIA | MONTO), sin columna Fecha, 2 decimales y balance a 0,00 en cada hoja.</li>
+                  </ul>
+                )}
+              </div>
+
+              {/* Enlace y descarga directa del Modelo Real de Referencia proporcionado */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/80">
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-700 font-semibold">
+                  <span>📌 <strong>Calibrado con el Modelo Real:</strong></span>
+                  <span className="font-mono text-[10px] text-slate-600 bg-white/80 px-2 py-0.5 rounded border border-slate-200">
+                    1_ASIENTO_febrero_2025_vzla_y_banescoCOSTANERA.csv
+                  </span>
+                </div>
+                <a
+                  href="/assets/aistudio/1_ASIENTO_febrero_2025_vzla_y_banescoCOSTANERA_ff9cf26b.csv"
+                  download="1_ASIENTO_febrero_2025_vzla_y_banescoCOSTANERA.csv"
+                  className="flex items-center gap-1 px-3 py-1 rounded-lg bg-white hover:bg-slate-50 text-slate-800 font-bold text-xs border border-slate-300 shadow-2xs transition-all cursor-pointer"
+                  title="Descargar archivo CSV de modelo de producción para Banesco y Banco de Venezuela"
+                >
+                  <Download className="w-3.5 h-3.5 text-cyan-700" />
+                  <span>📥 Descargar Modelo CSV de Referencia</span>
+                </a>
+              </div>
+
+              {showPromptView && activeBankDef.promptTemplate && (
+                <div className={`mt-3 pt-3 border-t space-y-2 animate-fadeIn ${
+                  selectedBankCode === '0102' ? 'border-rose-200' : 'border-amber-200'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <span className={`text-[10px] font-mono uppercase font-bold ${
+                      selectedBankCode === '0102' ? 'text-rose-800' : 'text-amber-800'
+                    }`}>
+                      Texto Íntegro del Prompt Activo para {activeBankDef.bankName}:
+                    </span>
+                    <span className="text-[10px] text-slate-500 italic">Selecciona y copia para usar con IA o tus sistemas</span>
+                  </div>
+                  <pre className={`text-[11px] font-mono text-slate-800 bg-white p-3.5 rounded-xl border overflow-x-auto max-h-72 whitespace-pre-wrap leading-relaxed select-all ${
+                    selectedBankCode === '0102' ? 'border-rose-200' : 'border-amber-200'
+                  }`}>
+                    {activeBankDef.promptTemplate}
+                  </pre>
+                </div>
+              )}
+            </div>
+          )}
+
           {filteredRules.map((rule) => {
             const stats = ruleMatchStats.counts[rule.id] || { count: 0, totalAmount: 0 };
             const isNC = rule.ruleType === 'NC';

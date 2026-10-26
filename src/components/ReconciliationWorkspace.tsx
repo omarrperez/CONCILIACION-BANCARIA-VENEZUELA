@@ -900,6 +900,50 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                   <button
                     onClick={() => {
                       setIsToolsMenuOpen(false);
+                      generateBankLedgerExcel(transactions, '0102', company, currency);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-rose-50 text-slate-800 font-medium flex items-center justify-between cursor-pointer"
+                    title="Generar archivo asientos_generados.xlsx según el prompt oficial de Banco de Venezuela (3 Hojas con Partida Doble)"
+                  >
+                    <div className="flex items-center gap-2">
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-rose-600" />
+                      <span>Asientos BDV (asientos_generados.xlsx)</span>
+                    </div>
+                    <span className="text-[10px] text-rose-900 font-bold font-mono px-1.5 py-0.5 rounded bg-rose-100">BDV 0102</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setIsToolsMenuOpen(false);
+                      generateBankLedgerExcel(transactions, '0134', company, currency);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-amber-50 text-slate-800 font-medium flex items-center justify-between cursor-pointer"
+                    title="Generar archivo asientos_generados.xlsx según el prompt oficial de Banesco"
+                  >
+                    <div className="flex items-center gap-2">
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Asientos Banesco (asientos_generados.xlsx)</span>
+                    </div>
+                    <span className="text-[10px] text-amber-900 font-bold font-mono px-1.5 py-0.5 rounded bg-amber-100">Banesco</span>
+                  </button>
+
+                  <a
+                    href="/assets/aistudio/1_ASIENTO_febrero_2025_vzla_y_banescoCOSTANERA_ff9cf26b.csv"
+                    download="1_ASIENTO_febrero_2025_vzla_y_banescoCOSTANERA.csv"
+                    onClick={() => setIsToolsMenuOpen(false)}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-cyan-50 text-slate-800 font-medium flex items-center justify-between cursor-pointer"
+                    title="Descargar archivo CSV de modelo de producción Febrero 2025 (Banesco y Banco de Venezuela)"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Download className="w-3.5 h-3.5 text-cyan-600" />
+                      <span>Descargar Modelo Real CSV (Febrero 2025)</span>
+                    </div>
+                    <span className="text-[10px] text-cyan-900 font-bold font-mono px-1.5 py-0.5 rounded bg-cyan-100">CSV Modelo</span>
+                  </a>
+
+                  <button
+                    onClick={() => {
+                      setIsToolsMenuOpen(false);
                       const targetBank = selectedBank !== 'ALL' ? selectedBank : '';
                       const proof = calculateProofOfCash(transactions, targetBank, currency, initialBalanceBank, initialBalanceLedger);
                       exportToReconciliationProofExcel({

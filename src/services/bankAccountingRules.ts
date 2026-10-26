@@ -20,6 +20,7 @@ export interface BankRulesDefinition {
   accountCodeBank: string;
   accountNameBank: string;
   rules: BankRuleItem[];
+  promptTemplate?: string;
 }
 
 /**
@@ -98,27 +99,93 @@ export function formatVenezuelanNumber(num: number | string | undefined | null):
 
 
 // -------------------------------------------------------------
-// 1. BANCO DE VENEZUELA (0102) - SEGÚN PROMPT OFICIAL PDF
+// 1. BANCO DE VENEZUELA (0102) - REGLAS SEGÚN PROMPT OFICIAL
 // -------------------------------------------------------------
+export const BDV_OFFICIAL_PROMPT = `Prompt Completo – Agente de Inteligencia Artificial para Generación de Asientos Contables
+Rol:
+Actúa como un experto en contabilidad con experiencia en conciliaciones bancarias, análisis de estados de cuenta bancarios, y generación de asientos contables en formato Excel para carga automática en un sistema contable.
+Objetivo:
+A partir de un estado de cuenta bancario cargado en formato Excel, CSV o PDF, clasificar todas las transacciones en notas de crédito (NC) (montos positivos) y notas débito (ND) (montos negativos), asignar las cuentas contables a cada fila del archivo y  generar un archivo Excel con las siguientes hojas:
+Instrucciones:
+Hoja 1 (NC) – Notas de Crédito (montos positivos):
+1.	Filtrar todas las transacciones con monto positivo.
+2.	Asignar cuenta contable: Para todas estas filas, la cuenta contable será 1.1.1.2.20 (Banco de Venezuela).
+3.	Tipo de operación: Colocar NC (Nota de Crédito) en la columna "TIPO".
+4.	Orden de columnas:
+o	CUENTA CONTABLE | DESCRIPCION | TIPO | REFERENCIA | MONTO
+5.	Contrapartida: Al final de la hoja, agregar una fila adicional con:
+o	CUENTA CONTABLE: 1.1.2.1.10 (Cuentas por cobrar).
+o	DESCRIPCION: "Cuentas por cobrar (contrapartida NC)".
+o	TIPO: NC.
+o	REFERENCIA: "RES-[fecha actual en formato DD-MM-AAAA]".
+o	MONTO: La suma total de las NC, pero en negativo (para que el asiento cierre en cero).
+6.	Validación: La suma de la columna MONTO debe ser exactamente cero (asegurar que el asiento esté balanceado).
+7.	Formato de archivo final: Guardar el archivo Excel como asientos_generados.xlsx, con la Hoja 1 titulada "Hoja 1 (NC)".
+8.	La columna “Monto” debe incluir los valores en positivo (+) y negativos (-) que EXTRAISTES del estado de cuenta. En la hoja 1, deben aparecer todas las “NC”  de cada fila del estado de cuenta, asi como su fila de resumen al final y como contratipartida la cuenta 1.1.2.1.10 (cuentas por cobrar) en sino negativo.
+________________________________________
+Hoja 2 (ND) – Notas Débito (montos negativos):
+1.	Filtrar todas las transacciones con monto negativo.
+2.	Asignar cuenta contable: 
+3.	Tipo de operación: Colocar ND (Nota Débito) en la columna "TIPO".
+4.	Orden de columnas: En la hoja 2, el orden de las columnas del archivo a crear es el siguiente:
+      CUENTA CONTABLE | DESCRIPCION | TIPO | REFERENCIA | MONTO
+Regla 1: Comisiones Bancarias - Nota de Débito (ND)
+o	Cuenta: 6.1.2.5.02 (Comisiones Bancarias)
+o	Condiciones:
+	Descripción contiene términos como: Toda descripción que tenga la palabra "COM ", “COBRO COMISION”, “COMIS”, “COMISION OPERACIÓN”, “COMISION PAGOMOVILBDV”, entre otros.
+Contrapartida Automática: Generar asiento en el código 1.1.1.2.20 (Banco), y descripción BANCO VENEZUELA, referencia que este en la fila correspondiente del estado de cuenta y el monto que contiene la fila en negativo (-)
+Regla 2: Compras/Servicios - Nota de Débito (ND)
+o	Cuenta: 2.1.1.1.10 (Cuentas por Pagar)
+o	Condiciones:
+	Descripción contiene: “PAGO A OTROS BANCOS 0115 V4500052”, “PAGO A TERCEROS BDV V04500052”, 
+o	Contrapartida Automática: Generar asiento en 1.1.1.2.40 (Banco), con el monto negativo y descripción BANCO VENEZUELA.
+5.	Validación: La suma de la columna MONTO debe ser exactamente cero (asegurar que el asiento esté balanceado).
+6.	Formato de archivo final: Guardar el archivo Excel como asientos_generados.xlsx, con la Hoja 2 titulada "Hoja 2 (ND)".
+________________________________________
+Hoja 3 (ND + ND) – Unificación de NC y ND:
+1.	Unificar las transacciones de NC y ND en un solo flujo de trabajo.
+2.	Incluir las filas de la Hoja 1 (NC) y Hoja 2 (ND) juntas.
+3.	Asegurar balance: Las contrapartidas deben estar ajustadas para que el asiento contable cierre en cero.
+o	La suma total de NC debe balancear con la suma total de ND.
+4.	Orden de columnas final:
+      CUENTA CONTABLE | DESCRIPCION | TIPO | REFERENCIA | MONTO
+5.	Formato de archivo final: Guardar el archivo Excel como asientos_generados.xlsx, con la Hoja 3 titulada "Hoja 3 (ND + ND)".
+________________________________________
+Consideraciones Técnicas y Generales:
+•	El archivo final será un Excel con tres hojas:
+1.	Hoja 1 (NC): Contendrá las notas de crédito (montos positivos) y su contrapartida en la cuenta de Cuentas por cobrar.
+2.	Hoja 2 (ND): Contendrá las notas débito (montos negativos) y su contrapartida en la cuenta de Banco de Venezuela o la cuenta que corresponda.
+3.	Hoja 3 (ND + ND): Unificación de todas las transacciones de NC y ND con las contrapartidas balanceadas.
+•	El formato de los montos debe estar en dos decimales.
+•	El campo REFERENCIA debe mantener el valor original de la transacción.
+•	Las descripciones deben mantenerse tal cual aparecen en el estado de cuenta.
+________________________________________
+Resultado Esperado:
+El agente debe generar un archivo Excel con las tres hojas mencionadas, balanceando las transacciones correctamente y asegurando que el asiento quede en cero.
+Cada hoja debe ser independiente pero seguir la misma estructura, para que al final puedas tener una vista general con todo el flujo de las notas de crédito (NC) y notas débito (ND) de manera organizada y lista para cargar en el sistema contable.`;
+
 export const BDV_RULES_DEFINITION: BankRulesDefinition = {
   bankCode: '0102',
   bankName: 'Banco de Venezuela S.A.',
-  accountCodeBank: '1.1.1.2.30',
+  accountCodeBank: '1.1.1.2.20',
   accountNameBank: 'Banco de Venezuela Cta Corriente',
+  promptTemplate: BDV_OFFICIAL_PROMPT,
   rules: [
     {
-      id: 'BDV_R1_INGRESOS',
+      id: 'BDV_NC_R1_INGRESOS',
       order: 1,
-      name: 'Regla 1: Ingresos / Depósitos y Transferencias Recibidas',
+      name: 'Hoja 1 (NC): Notas de Crédito (Montos Positivos) - Banco de Venezuela',
       ruleType: 'NC',
-      targetAccountCode: '1.1.1.2.30',
+      targetAccountCode: '1.1.1.2.20',
       targetAccountName: 'Banco de Venezuela Cta Corriente',
       contraAccountCode: '1.1.2.1.10',
-      contraAccountName: 'Cuentas por Cobrar Clientes',
+      contraAccountName: 'Cuentas por cobrar (contrapartida NC)',
       descriptionPatterns: [
+        'VENEZUELA',
         'ABONO RECIBIDO OTR BCOS',
         'LIQ MONEDERO PATRIA',
         'LIQUIDACION TDC BIOPAGOBDV',
+        'BIOPAGOBDV',
         'OP PAGOMOVILBDV OTROS BAN',
         'OPERACION PAGOMOVIL BDV',
         'PAGO OTRAS CTAS JUR NAT',
@@ -126,89 +193,88 @@ export const BDV_RULES_DEFINITION: BankRulesDefinition = {
         'PAGO RECIBIDO OTROS BANCOS',
         'PAGOMOVIL OTROS BANCOS',
         'PTO. LA CRUZ AV. MUNICIPA',
-        'TRASPASO OTRAS CTAS BDV E'
+        'TRASPASO OTRAS CTAS BDV E',
+        'PAGO MOVIL',
+        'PAGOMOVIL',
+        'DEPOSITO'
       ],
-      notes: 'Monto positivo (+). En la Hoja 2 del Excel se totaliza contra 1.1.2.1.10 (Cuentas por Cobrar) en negativo para cuadrar a 0.00.'
+      notes: 'Monto positivo (+). Cuenta 1.1.1.2.20 con contrapartida final en 1.1.2.1.10 (Cuentas por cobrar) con referencia RES-[DD-MM-AAAA] y monto total en negativo para sumar exactamente 0.00.'
     },
     {
-      id: 'BDV_R2_CXP_SOCIOS',
+      id: 'BDV_ND_R1_COMISIONES',
       order: 2,
-      name: 'Regla 2: Cuenta por Pagar Socios (Aportes/Préstamos del Dueño)',
-      ruleType: 'NC',
-      targetAccountCode: '1.1.1.2.30',
-      targetAccountName: 'Banco de Venezuela Cta Corriente',
-      contraAccountCode: '2.1.1.3.15',
-      contraAccountName: 'Cuentas por Pagar Socios / Accionistas',
+      name: 'Regla 1 (ND): Comisiones Bancarias - Nota de Débito',
+      ruleType: 'ND',
+      targetAccountCode: '6.1.2.5.02',
+      targetAccountName: 'Comisiones Bancarias',
+      contraAccountCode: '1.1.1.2.20',
+      contraAccountName: 'Banco de Venezuela',
       descriptionPatterns: [
-        'TRANSF RECIBIDA BDV V08973555 CARLOS ALBERTO A',
-        'TRANSF RECIBIDA BDV V08973555',
-        'TRANSF RECIBIDA BDV CARLOS ALBERTO',
-        'TRANSF RECIBIDA BDV CARLOS ALFONZO'
+        'COBRO COMISION PAG MOVIL BDV A',
+        'COBRO COMISION',
+        'COM MANTENIMIENTO DE CUENTA',
+        'COM MANTENIMIENTO DE CUEN',
+        'COM PAGO OTRAS CTAS JUR NAT',
+        'COM PAGO OTR BCOS JUR NAT',
+        'COM TRANSF LINEA OT BCOS CTA P',
+        'COM TRANSF EN LINEA OT BC',
+        'COMIS SERVICIOS DE POS BCV',
+        'COMISION OPERACION BIOMETRIA',
+        'COMISION PAGOMOVILBDV',
+        'COM BANCA MOVIL BDV',
+        'COMISION OPERACIÓN',
+        'COMISION OPERACION',
+        'COM ',
+        'COMIS',
+        'COMISION PAGO A PROVEEDORES',
+        'COMISION T FALLIDA P2P BD'
       ],
-      notes: 'Monto positivo (+). Cuenta 1.1.1.2.30 en el Debe y cuenta 2.1.1.3.15 en el Haber (negativo) para cuadre exacto.'
+      notes: 'Comisiones bancarias. Fila positiva en 6.1.2.5.02 y contrapartida automática 1.1.1.2.20 BANCO VENEZUELA en negativo (-).'
     },
     {
-      id: 'BDV_R3_PROVEEDORES',
+      id: 'BDV_ND_R2_COMPRAS',
       order: 3,
-      name: 'Regla 3: Proveedores y Pagos Operativos',
+      name: 'Regla 2 (ND): Compras / Servicios - Nota de Débito',
       ruleType: 'ND',
       targetAccountCode: '2.1.1.1.10',
-      targetAccountName: 'Cuentas por Pagar Proveedores Nacionales',
-      contraAccountCode: '1.1.1.2.30',
-      contraAccountName: 'Banco de Venezuela Cta Corriente',
+      targetAccountName: 'Cuentas por Pagar',
+      contraAccountCode: '1.1.1.2.20',
+      contraAccountName: 'Banco de Venezuela',
       descriptionPatterns: [
+        'PAGO A TERCEROS BDV V04500052 ENOELIA BARRIOS',
+        'PAGO A TERCEROS BDV V04500052',
+        'PAGO A TERCEROS BDV',
+        'TRANSF EN LINEA OT BCOS CTA PR',
+        'TRANSF EN LINEA OT BCOS',
+        'TRANSF EN LINEA OTR BCOS',
+        'PAGO A OTROS BANCOS 0115 V4500052',
         'DOMICILIACION OTROS BANCOS',
         'OPERACION PAGOMOVIL BDV',
         'OPERACION PAGOMOVILBDV OT',
         'PAGO A OTROS BANCOS',
         'PAGO A PROVEEDORES OTROS BANCOS',
         'PAGO IMPUESTOS INTERNET',
-        'TRANSF EN LINEA OT BCOS CTA PR',
-        'TRANSF EN LINEA OTR BCOS',
         'TRASPASO OTRAS CTAS BDV E'
       ],
-      notes: 'Monto negativo (-). Partida doble: fila en positivo con 2.1.1.1.10 y fila en negativo con 1.1.1.2.30.'
+      notes: 'Compras y servicios. Fila positiva en 2.1.1.1.10 y contrapartida automática 1.1.1.2.20 (o 1.1.1.2.40) BANCO VENEZUELA en negativo (-).'
     },
     {
-      id: 'BDV_R4_COMISIONES',
+      id: 'BDV_ND_R3_SOCIOS',
       order: 4,
-      name: 'Regla 4: Comisiones Bancarias y Mantenimiento',
-      ruleType: 'ND',
-      targetAccountCode: '6.1.2.5.02',
-      targetAccountName: 'Gastos por Comisiones Bancarias',
-      contraAccountCode: '1.1.1.2.30',
-      contraAccountName: 'Banco de Venezuela Cta Corriente',
-      descriptionPatterns: [
-        'COBRO COMISION PAG MOVIL',
-        'COM BANCA MOVIL BDV',
-        'COM MANTENIMIENTO DE CUEN',
-        'COM MANTENIMIENTO DE CUENTA',
-        'COM PAGO OTR BCOS JUR NAT',
-        'COM PAGO OTRAS CTAS JUR NAT',
-        'COM TRANSF EN LINEA OT BC',
-        'COM TRANSF LINEA OT BCOS CTA P',
-        'COMISION OPERACION BIOMETRIA',
-        'COMISION PAGO A PROVEEDORES',
-        'COMISION PAGOMOVILBDV',
-        'COMISION T FALLIDA P2P BD'
-      ],
-      notes: 'Monto negativo (-). Partida doble: fila en positivo con 6.1.2.5.02 y fila en negativo con 1.1.1.2.30.'
-    },
-    {
-      id: 'BDV_R5_CXC_SOCIOS',
-      order: 5,
-      name: 'Regla 5: Cuentas por Cobrar Socios (Retiros Personales del Dueño)',
+      name: 'Regla 3 (ND): Cuentas por Cobrar Socios (Retiros Personales)',
       ruleType: 'ND',
       targetAccountCode: '1.1.2.2.30',
       targetAccountName: 'Cuentas por Cobrar Socios y Directores',
-      contraAccountCode: '1.1.1.2.30',
-      contraAccountName: 'Banco de Venezuela Cta Corriente',
+      contraAccountCode: '1.1.1.2.20',
+      contraAccountName: 'Banco de Venezuela',
       descriptionPatterns: [
         'PAGO A TERCEROS BDV V08973555 CARLOS ALFONZO',
         'PAGO A TERCEROS BDV V08973555',
-        'PAGO A TERCEROS BDV CARLOS ALFONZO'
+        'PAGO A TERCEROS BDV CARLOS ALFONZO',
+        'RETIRO SOCIO',
+        'CUENTAS POR COBRAR SOCIO'
       ],
-      notes: 'Monto negativo (-). El dueño se transfiere fondos de la empresa a su cuenta personal.'
+      notes: 'Retiro personal de socio imputado a cuenta de activo exigible 1.1.2.2.30.'
     }
   ]
 };
@@ -611,25 +677,120 @@ export const PLAZA_RULES_DEFINITION: BankRulesDefinition = {
 };
 
 // -------------------------------------------------------------
-// 4. BANESCO BANCO UNIVERSAL (0134) - MODELO OFICIAL SGT CONTABLE
+// 4. BANESCO BANCO UNIVERSAL (0134) - REGLAS SEGÚN PROMPT OFICIAL
 // -------------------------------------------------------------
+export const BANESCO_OFFICIAL_PROMPT = `Rol:
+Actúa como un experto en contabilidad con experiencia en conciliaciones bancarias, análisis de estados de cuenta bancarios, y generación de asientos contables en formato Excel para carga automática en un sistema contable.
+Objetivo:
+A partir de un estado de cuenta bancario cargado en formato Excel, CSV o PDF, clasificar todas las transacciones en notas de crédito (NC) (montos positivos) y notas débito (ND) (montos negativos), asignar las cuentas contables a cada fila del archivo y generar un archivo Excel con las siguientes hojas:
+Instrucciones:
+Hoja 1 (NC) – Notas de Crédito (montos positivos):
+1.	Filtrar todas las transacciones con monto positivo.
+2.	Asignar cuenta contable: Para todas estas filas, la cuenta contable será 1.1.1.2.10 (Banco Banesco).
+3.	Tipo de operación: Colocar NC (Nota de Crédito) en la columna "TIPO".
+4.	Orden de columnas:
+o	CUENTA CONTABLE | DESCRIPCION | TIPO | REFERENCIA | MONTO
+5.	Contrapartida: Al final de la hoja, agregar una fila adicional con:
+o	CUENTA CONTABLE: 1.1.2.1.10 (Cuentas por cobrar).
+o	DESCRIPCION: "Cuentas por cobrar (contrapartida NC)".
+o	TIPO: NC.
+o	REFERENCIA: "RES-[fecha actual en formato DD-MM-AAAA]".
+o	MONTO: La suma total de las NC, pero en negativo (para que el asiento cierre en cero).
+6.	Validación: La suma de la columna MONTO debe ser exactamente cero (asegurar que el asiento esté balanceado).
+7.	Formato de archivo final: Guardar el archivo Excel como asientos_generados.xlsx, con la Hoja 1 titulada "Hoja 1 (NC)".
+8.	La columna “Monto” debe incluir los valores en positivo (+) que EXTRAISTES del estado de cuenta. Asegúrate que la hoja 1, tenga la contrapartida correspondiente en negativo, con el fin de que el asiento contable sume cero.
+9.	 En la hoja 1, deben aparecer todas las “NC” de cada fila del estado de cuenta, así como su fila de resumen al final y como contrapartida la cuenta 1.1.2.1.10 (cuentas por cobrar) en sino negativo.
+________________________________________
+
+Hoja 2 (ND) – Notas Débito (montos negativos):
+1.	Filtrar todas las transacciones con monto negativo.
+2.	Asignar cuenta contable: 
+3.	Tipo de operación: Colocar ND (Nota Débito) en la columna "TIPO".
+4.	Orden de columnas: En la hoja 2, el orden de las columnas del archivo a crear es el siguiente:
+      CUENTA CONTABLE | DESCRIPCION | TIPO | REFERENCIA | MONTO
+ASIGNACION DE CUENTAS CONTABLES:
+Regla 1: Cuenta Contable : Comisiones Bancarias - Nota de Débito (ND)
+o	Cuenta: 6.1.2.5.02 (Comisiones Bancarias)
+o	Condiciones:
+	Descripción contiene términos como: Toda descripción que tenga la palabra: “Com, Banesco Pago Movil”, “COM, TRF. CR.INM.OB”, “Comision Servicio SMS”, “EMISION DE ESTADO DE CUENTA”, “MantÿySÿerv  Aplc  POS”, SERV MTTO, POS/NATIVA,  entre otros.
+Contrapartida Automática: Generar asiento en el código 1.1.1.2.10 (Banco), y descripción BANESCO, referencia que este en la fila correspondiente del estado de cuenta y el monto que contiene la fila en negativo (-)
+Regla 2: Compras/Servicios - Nota de Débito (ND)
+o	Cuenta: 2.1.1.1.10 (Cuentas por Pagar)
+o	Condiciones:
+	Descripción contiene: “TRF CR INM 0102 V004500052”, “TRF CR INM 0191 J070003448”
+•	Contrapartida Automática: Generar asiento en 1.1.1.2.10 (Banco), con el monto negativo y descripción BANESCO.
+Regla 3: Servicios - Nota de Débito (ND)
+o	Cuenta: 6.1.2.1.20 (Electricidad)
+o	Condiciones:
+	Descripción contiene: “ELECTRICIDAD CARGO C/CTA”
+•	Contrapartida Automática: Generar asiento en 1.1.1.2.10 (Banco), con el monto negativo y descripción BANESCO.
+Regla 4: Nomina - Nota de Débito (ND)
+o	Cuenta: 2.1.3.2.10 (Nomina Por Pagar)
+o	Condiciones:
+	Descripción contiene: “TRANS,CTAS. A TERCEROS BANESCO”
+•	Contrapartida Automática: Generar asiento en 1.1.1.2.10 (Banco), con el monto negativo y descripción BANESCO.
+Regla 5: Impuestos- Nota de Débito (ND)
+o	Cuenta: 2.1.2.2.20 (iva Por Pagar)
+o	Condiciones:
+	Descripción contiene: “INCLUSION DE PLANILLA SENIAT C”
+•	Contrapartida Automática: Generar asiento en 1.1.1.2.10 (Banco), con el monto negativo y descripción BANESCO.
+
+5.	Validación: La suma de la columna MONTO debe ser exactamente cero (asegurar que el asiento esté balanceado).
+6.	Formato de archivo final: Guardar el archivo Excel como asientos_generados.xlsx, con la Hoja 2 titulada "Hoja 2 (ND)".
+7.	En la hoja 2 debes asegúrate de que en cada fila aparezca un monto en positivo que siempre iría cargada a la cuenta 6.1.2.5.02, 2.1.1.1.10, 6.1.2.1.20, 2.1.3.2.10, etc., dependiendo de la descripción de cada  UNA, “SIN EXCEPCION” TODAS LAS CUENTAS QUE TENGAN “REGLAS”, DEBEN IR EN POSITIVO (+) EN EL ASIENTO CONTABLE Y SU CONTRAPARTIDA BANCO VA EN NEGATIVO (-), ESTO ES UNICAMENTE PARA LA HOJA 2.
+Luego de haber asignado cada fila a su cuenta contable correspondiente, de acuerdo a la descripción de la fila, vas a copiar todas las filas nuevamente a partir de la primera fila en blanco, allí vas copiar la descripción, el tipo, la referencia de cada fila, vas a asignar a todo ese copy a la cuenta contable 1.1.1.2.10 (Banco). Y en la columna monto vas a copiar todos los montos de las filas en signo negativo (-)
+
+________________________________________
+Hoja 3 (ND + ND) – Unificación de NC y ND:
+1.	Unificar las transacciones de NC y ND en un solo flujo de trabajo.
+2.	Incluir las filas de la Hoja 1 (NC) y Hoja 2 (ND) juntas.
+3.	Asegurar balance: Las contrapartidas deben estar ajustadas para que el asiento contable cierre en cero.
+o	La suma total de NC debe balancear con la suma total de ND.
+4.	Orden de columnas final:
+      CUENTA CONTABLE | DESCRIPCION | TIPO | REFERENCIA | MONTO
+5.	Formato de archivo final: Guardar el archivo Excel como asientos_generados.xlsx, con la Hoja 3 titulada "Hoja 3 (ND + ND)".
+________________________________________
+Consideraciones Técnicas y Generales:
+•	El archivo final será un Excel con tres hojas:
+1.	Hoja 1 (NC): Contendrá las notas de crédito (montos positivos) y su contrapartida en la cuenta de Cuentas por cobrar.
+2.	Hoja 2 (ND): Contendrá las notas débito (montos negativos) y su contrapartida en la cuenta de Banco de Venezuela o la cuenta que corresponda.
+3.	Hoja 3 (ND + ND): Unificación de todas las transacciones de NC y ND con las contrapartidas balanceadas.
+•	El formato de los montos debe estar en dos decimales.
+•	El campo REFERENCIA debe mantener el valor original de la transacción.
+•	Las descripciones deben mantenerse tal cual aparecen en el estado de cuenta.
+________________________________________
+Resultado Esperado:
+El agente debe generar un archivo Excel con las tres hojas mencionadas.
+El encabezado de cada página debe ser: Columna 1 = CUENTA CONTABLE; Columna 2 = DESCRIPCION; Columna 3: TIPO; Columna 4 = REFERENCIA y Columna 5 = MONTO.
+asegúrate que el asiento quede en cero y de no incluir una columna “fecha” en el asiento.
+Cada hoja debe ser independiente, pero seguir la misma estructura.
+Debes responder siempre en español.`;
+
 export const BANESCO_RULES_DEFINITION: BankRulesDefinition = {
   bankCode: '0134',
   bankName: 'Banesco Banco Universal',
   accountCodeBank: '1.1.1.2.10',
   accountNameBank: 'Banesco Banco Universal Cta Corriente',
+  promptTemplate: BANESCO_OFFICIAL_PROMPT,
   rules: [
     {
-      id: 'BNS_R1_INGRESOS',
+      id: 'BNS_NC_R1_INGRESOS',
       order: 1,
-      name: 'Regla 1: Ingresos / Depósitos y Transferencias Recibidas',
+      name: 'Hoja 1 (NC): Notas de Crédito (Montos Positivos) - Banco Banesco',
       ruleType: 'NC',
       targetAccountCode: '1.1.1.2.10',
       targetAccountName: 'Banesco Banco Universal Cta Corriente',
       contraAccountCode: '1.1.2.1.10',
-      contraAccountName: 'Cuentas por Cobrar Clientes',
+      contraAccountName: 'Cuentas por cobrar (contrapartida NC)',
       descriptionPatterns: [
+        'BANESCO PAGO MOVIL',
         'BANESCO',
+        'TDB CAPIT',
+        'TDB ',
+        'TDC ',
+        'TMD ',
+        'TT ',
+        'TVD ',
         'ABONO RECIBIDO',
         'PAGO MOVIL',
         'PAGOMOVIL',
@@ -642,68 +803,33 @@ export const BANESCO_RULES_DEFINITION: BankRulesDefinition = {
         'PUNTOS DE VENTA',
         'CREDITO'
       ],
-      notes: 'Monto positivo (+). En la Hoja 2 del Excel se totaliza contra 1.1.2.1.10 (CUENTAS POR COBRAR) en negativo para cuadrar a 0.00.'
+      notes: 'Monto positivo (+). Cuenta 1.1.1.2.10 con contrapartida final en 1.1.2.1.10 (Cuentas por cobrar) con referencia RES-[DD-MM-AAAA] y monto total en negativo para sumar exactamente 0.00.'
     },
     {
-      id: 'BNS_R2_CXP_SOCIOS',
+      id: 'BNS_ND_R1_COMISIONES',
       order: 2,
-      name: 'Regla 2: Cuentas por Pagar Socios (Aportes del Dueño)',
-      ruleType: 'NC',
-      targetAccountCode: '1.1.1.2.10',
-      targetAccountName: 'Banesco Banco Universal Cta Corriente',
-      contraAccountCode: '2.1.1.3.15',
-      contraAccountName: 'Cuentas por Pagar Socios',
-      descriptionPatterns: [
-        'APORTE SOCIO',
-        'PRESTAMO SOCIO',
-        'TRANSFERENCIA SOCIO',
-        'APORTE ACCIONISTA',
-        'APORTE DE CAPITAL'
-      ],
-      notes: 'Monto positivo (+). Ingreso por préstamo o aporte del accionista.'
-    },
-    {
-      id: 'BNS_R3_BANAVIH',
-      order: 3,
-      name: 'Regla 3: Aportes Parafiscales BANAVIH (FAOV)',
-      ruleType: 'ND',
-      targetAccountCode: '6.1.1.2.16',
-      targetAccountName: 'Gastos de Personal BANAVIH / FAOV',
-      contraAccountCode: '1.1.1.2.10',
-      contraAccountName: 'Banesco Banco Universal Cta Corriente',
-      descriptionPatterns: [
-        'BANAVIH REC. EN LINEA',
-        'BANAVIH',
-        'FAOV'
-      ],
-      notes: 'Monto negativo (-). Partida doble: 6.1.1.2.16 (+) y Banesco 1.1.1.2.10 (-).'
-    },
-    {
-      id: 'BNS_R4_IVSS',
-      order: 4,
-      name: 'Regla 4: Seguridad Social IVSS',
-      ruleType: 'ND',
-      targetAccountCode: '6.1.1.2.14',
-      targetAccountName: 'Gastos de Personal Seguro Social IVSS',
-      contraAccountCode: '1.1.1.2.10',
-      contraAccountName: 'Banesco Banco Universal Cta Corriente',
-      descriptionPatterns: [
-        'IVSS',
-        'SEGURO SOCIAL',
-        'TIUNA'
-      ],
-      notes: 'Monto negativo (-). Partida doble: 6.1.1.2.14 (+) y Banesco 1.1.1.2.10 (-).'
-    },
-    {
-      id: 'BNS_R5_COMISIONES',
-      order: 5,
-      name: 'Regla 5: Comisiones Bancarias',
+      name: 'Regla 1 (ND): Comisiones Bancarias - Nota de Débito',
       ruleType: 'ND',
       targetAccountCode: '6.1.2.5.02',
-      targetAccountName: 'Gastos por Comisiones Bancarias',
+      targetAccountName: 'Comisiones Bancarias',
       contraAccountCode: '1.1.1.2.10',
-      contraAccountName: 'Banesco Banco Universal Cta Corriente',
+      contraAccountName: 'Banesco Banco Universal',
       descriptionPatterns: [
+        'Com, Banesco Pago Movil',
+        'COM, TRF. CR.INM.OB',
+        'COM,SERV.MTTO CTA',
+        'Comision Servicio SMS',
+        'EMISION DE ESTADO DE CUENTA',
+        'MantÿySÿerv  Aplc  POS',
+        'MantÿySÿerv Aplc POS',
+        'Mant  ySÿerv  Aplc  POS',
+        'Mant ySÿerv Aplc POS',
+        'Mant  ySÿerv  Aplc  POS  ENE',
+        'Mant ySÿerv Aplc POS ENE 25',
+        'SERV MTTO, POS/NATIVA',
+        'SERV MTTO, POS/NATIVA  45',
+        'SERV MTTO',
+        'POS/NATIVA',
         'COMISIONES BANCARIAS',
         'COMISION BANCARIA',
         'COM. PAGO MOVIL',
@@ -714,144 +840,493 @@ export const BANESCO_RULES_DEFINITION: BankRulesDefinition = {
         'MANTENIMIENTO DE CUENTA',
         'CARGO MENSUAL'
       ],
-      notes: 'Monto negativo (-). Partida doble: 6.1.2.5.02 (+) y Banesco 1.1.1.2.10 (-).'
+      notes: 'Gasto por comisiones bancarias. Fila positiva en 6.1.2.5.02 y contrapartida automática 1.1.1.2.10 BANESCO en negativo (-).'
     },
     {
-      id: 'BNS_R6_TELEFONIA_SERVICIOS',
-      order: 6,
-      name: 'Regla 6: Telefonía e Internet (Movistar / Telecomunicaciones)',
-      ruleType: 'ND',
-      targetAccountCode: '6.1.2.1.15',
-      targetAccountName: 'Gastos de Comunicaciones y Telefonía Movistar',
-      contraAccountCode: '1.1.1.2.10',
-      contraAccountName: 'Banesco Banco Universal Cta Corriente',
-      descriptionPatterns: [
-        'MOVISTAR CARGO C/CTA',
-        'MOVISTAR CARGO C/CTA.',
-        'MOVISTAR',
-        'DIGITEL',
-        'CANTV'
-      ],
-      notes: 'Monto negativo (-). Partida doble: 6.1.2.1.15 (+) y Banesco 1.1.1.2.10 (-).'
-    },
-    {
-      id: 'BNS_R7_ALCALDIA_MUNICIPALES',
-      order: 7,
-      name: 'Regla 7: Impuestos Municipales (Alcaldía)',
+      id: 'BNS_ND_R9_MUNICIPALES',
+      order: 3,
+      name: 'Regla 3 (ND): Impuestos Municipales y Patente (Alcaldía)',
       ruleType: 'ND',
       targetAccountCode: '6.1.2.1.40',
-      targetAccountName: 'Impuestos Municipales y Patente de Comercio',
+      targetAccountName: 'Impuestos Municipales y Patente',
       contraAccountCode: '1.1.1.2.10',
-      contraAccountName: 'Banesco Banco Universal Cta Corriente',
+      contraAccountName: 'Banesco Banco Universal',
       descriptionPatterns: [
+        'COMPRA POS CTA/CTE ALCALDIA DE',
         'ALCALDIA DEL MUNI',
-        'ALCALDIA DEL MUNI 0369',
         'ALCALDIA',
-        'IMPUESTO MUNICIPAL',
-        'SEMAT',
-        'SEDEMAT'
+        'IMPUESTO MUNICIPAL'
       ],
-      notes: 'Monto negativo (-). Partida doble: 6.1.2.1.40 (+) y Banesco 1.1.1.2.10 (-).'
+      notes: 'Tributos municipales. Fila positiva en 6.1.2.1.40 y contrapartida automática 1.1.1.2.10 BANESCO en negativo (-).'
     },
     {
-      id: 'BNS_R8_SEGUROS',
+      id: 'BNS_ND_R2_COMPRAS',
+      order: 4,
+      name: 'Regla 4 (ND): Compras / Servicios y Proveedores - Nota de Débito',
+      ruleType: 'ND',
+      targetAccountCode: '2.1.1.1.10',
+      targetAccountName: 'Cuentas por Pagar',
+      contraAccountCode: '1.1.1.2.10',
+      contraAccountName: 'Banesco Banco Universal',
+      descriptionPatterns: [
+        'COMPRA POS CTA/CTE PANADERIA Y',
+        'COMPRA POS CTA/CTE',
+        'COMPRA POS',
+        'TRF CR INM 0102 J309201522',
+        'TRF CR INM 0102 V004500052',
+        'TRF CR INM 0102',
+        'TRF CR INM 0108 V004500052',
+        'TRF CR INM 0108',
+        'TRF CR INM 0115 V004500052',
+        'TRF CR INM 0115',
+        'TRF CR INM 0191 J070003448',
+        'TRF CR INM 0191',
+        'TRF CR INM',
+        'PAGO PROVEEDOR',
+        'PAGO A TERCEROS',
+        'TRANSFERENCIA A TERCEROS',
+        'TRANS,CTAS. A TERCEROS BANESCO',
+        'MULTIPAGOS',
+        'ZOOM INTERNATIONA',
+        'SISTEALARMAS'
+      ],
+      notes: 'Compras y servicios proveedores. Fila positiva en 2.1.1.1.10 y contrapartida automática 1.1.1.2.10 BANESCO en negativo (-).'
+    },
+    {
+      id: 'BNS_ND_R3_ELECTRICIDAD',
+      order: 5,
+      name: 'Regla 5 (ND): Servicios (Electricidad) - Nota de Débito',
+      ruleType: 'ND',
+      targetAccountCode: '6.1.2.1.20',
+      targetAccountName: 'Electricidad',
+      contraAccountCode: '1.1.1.2.10',
+      contraAccountName: 'Banesco Banco Universal',
+      descriptionPatterns: [
+        'ELECTRICIDAD CARGO C/CTA',
+        'ELECTRICIDAD',
+        'CORPOELEC'
+      ],
+      notes: 'Servicio eléctrico. Fila positiva en 6.1.2.1.20 y contrapartida automática 1.1.1.2.10 BANESCO en negativo (-).'
+    },
+    {
+      id: 'BNS_ND_R4_NOMINA',
+      order: 6,
+      name: 'Regla 6 (ND): Nomina - Nota de Débito',
+      ruleType: 'ND',
+      targetAccountCode: '2.1.3.2.10',
+      targetAccountName: 'Nomina Por Pagar',
+      contraAccountCode: '1.1.1.2.10',
+      contraAccountName: 'Banesco Banco Universal',
+      descriptionPatterns: [
+        'PAGO NOMINA',
+        'NOMINA',
+        'SUELDOS Y SALARIOS',
+        'SUELDO'
+      ],
+      notes: 'Nómina de personal. Fila positiva en 2.1.3.2.10 y contrapartida automática 1.1.1.2.10 BANESCO en negativo (-).'
+    },
+    {
+      id: 'BNS_ND_R5_IMPUESTOS',
+      order: 7,
+      name: 'Regla 7 (ND): Impuestos (IVA Por Pagar) - Nota de Débito',
+      ruleType: 'ND',
+      targetAccountCode: '2.1.2.2.20',
+      targetAccountName: 'iva Por Pagar',
+      contraAccountCode: '1.1.1.2.10',
+      contraAccountName: 'Banesco Banco Universal',
+      descriptionPatterns: [
+        'INCLUSION DE PLANILLA SENIAT C',
+        'INCLUSION DE PLANILLA',
+        'PLANILLA SENIAT',
+        'SENIAT IVA',
+        'PLANILLA IVA'
+      ],
+      notes: 'Tributos SENIAT. Fila positiva en 2.1.2.2.20 y contrapartida automática 1.1.1.2.10 BANESCO en negativo (-).'
+    },
+    {
+      id: 'BNS_ND_R6_BANAVIH',
       order: 8,
-      name: 'Regla 8: Pólizas de Seguro Patrimoniales',
+      name: 'Regla 8 (ND): Aportes Parafiscales BANAVIH (FAOV)',
+      ruleType: 'ND',
+      targetAccountCode: '6.1.1.2.16',
+      targetAccountName: 'Gastos de Personal BANAVIH / FAOV',
+      contraAccountCode: '1.1.1.2.10',
+      contraAccountName: 'Banesco Banco Universal',
+      descriptionPatterns: ['BANAVIH REC. EN LINEA', 'BANAVIH', 'FAOV']
+    },
+    {
+      id: 'BNS_ND_R7_IVSS',
+      order: 9,
+      name: 'Regla 9 (ND): Seguridad Social IVSS',
+      ruleType: 'ND',
+      targetAccountCode: '6.1.1.2.14',
+      targetAccountName: 'Gastos de Personal Seguro Social IVSS',
+      contraAccountCode: '1.1.1.2.10',
+      contraAccountName: 'Banesco Banco Universal',
+      descriptionPatterns: ['IVSS', 'SEGURO SOCIAL', 'TIUNA']
+    },
+    {
+      id: 'BNS_ND_R8_TELEFONIA',
+      order: 10,
+      name: 'Regla 10 (ND): Telefonía e Internet',
+      ruleType: 'ND',
+      targetAccountCode: '6.1.2.1.15',
+      targetAccountName: 'Gastos de Comunicaciones y Telefonía',
+      contraAccountCode: '1.1.1.2.10',
+      contraAccountName: 'Banesco Banco Universal',
+      descriptionPatterns: ['MOVISTAR CARGO C/CTA', 'MOVISTAR', 'DIGITEL', 'CANTV']
+    },
+    {
+      id: 'BNS_ND_R10_SEGUROS',
+      order: 11,
+      name: 'Regla 11 (ND): Pólizas de Seguro',
       ruleType: 'ND',
       targetAccountCode: '6.1.2.1.25',
       targetAccountName: 'Gastos de Pólizas de Seguro',
       contraAccountCode: '1.1.1.2.10',
-      contraAccountName: 'Banesco Banco Universal Cta Corriente',
-      descriptionPatterns: [
-        'ESTAR SEGUROS, S. 0369',
-        'ESTAR SEGUROS',
-        'SEGUROS',
-        'POLIZA DE SEGURO'
-      ],
-      notes: 'Monto negativo (-). Partida doble: 6.1.2.1.25 (+) y Banesco 1.1.1.2.10 (-).'
+      contraAccountName: 'Banesco Banco Universal',
+      descriptionPatterns: ['ESTAR SEGUROS', 'SEGUROS', 'POLIZA DE SEGURO']
     },
     {
-      id: 'BNS_R9_PLANILLA_IVA',
-      order: 9,
-      name: 'Regla 9: Planilla IVA Quincenal SENIAT',
-      ruleType: 'ND',
-      targetAccountCode: '2.1.2.1.10',
-      targetAccountName: 'Impuesto al Valor Agregado por Pagar (IVA)',
-      contraAccountCode: '1.1.1.2.10',
-      contraAccountName: 'Banesco Banco Universal Cta Corriente',
-      descriptionPatterns: [
-        'PLANILLA IVA 1A QUINC',
-        'PLANILLA IVA 2A QUINC',
-        'PLANILLA IVA 1A QUINC ENERO 26',
-        'PLANILLA IVA',
-        'PAGO SENIAT IVA'
-      ],
-      notes: 'Monto negativo (-). Partida doble: 2.1.2.1.10 (+) y Banesco 1.1.1.2.10 (-). Cuenta complementaria: 1.1.4.1.11 si aplica.'
-    },
-    {
-      id: 'BNS_R10_ANTICIPO_ISLR',
-      order: 10,
-      name: 'Regla 10: Anticipos de ISLR SENIAT',
-      ruleType: 'ND',
-      targetAccountCode: '1.2.4.2.30',
-      targetAccountName: 'Anticipos de Impuesto Sobre la Renta (ISLR)',
-      contraAccountCode: '1.1.1.2.10',
-      contraAccountName: 'Banesco Banco Universal Cta Corriente',
-      descriptionPatterns: [
-        'ANTICIPO ISLR',
-        'DECLARACION ISLR',
-        'SENIAT ISLR'
-      ],
-      notes: 'Monto negativo (-). Partida doble: 1.2.4.2.30 (+) y Banesco 1.1.1.2.10 (-).'
-    },
-    {
-      id: 'BNS_R11_PROVEEDORES',
-      order: 11,
-      name: 'Regla 11: Cuentas por Pagar Proveedores y Comercios',
-      ruleType: 'ND',
-      targetAccountCode: '2.1.1.1.10',
-      targetAccountName: 'Cuentas por Pagar Proveedores',
-      contraAccountCode: '1.1.1.2.10',
-      contraAccountName: 'Banesco Banco Universal Cta Corriente',
-      descriptionPatterns: [
-        'Banesco Pago Movil',
-        'COMPRA POS CTA/CTE',
-        'COMPRA POS CTA/CTE FIORCA',
-        'CTA/CTE INTEGRAL COLOURS CMY',
-        'Mant y Serv Aplic',
-        'Mant y Serv Aplic 887782150126',
-        'PAGO MOVIL CCE',
-        'MULTIPAGOS',
-        'MULTIPAGOS 0105410371277',
-        'ZOOM INTERNATIONA',
-        'ZOOM INTERNATIONA 0369',
-        'SISTEALARMAS',
-        'SISTEALARMAS C.A. 0369',
-        'PAGO A TERCEROS',
-        'TRANSFERENCIA A TERCEROS',
-        'PAGO PROVEEDOR'
-      ],
-      notes: 'Monto negativo (-). Partida doble: 2.1.1.1.10 (+) y Banesco 1.1.1.2.10 (-).'
-    },
-    {
-      id: 'BNS_R12_CXC_SOCIOS',
+      id: 'BNS_ND_R11_SOCIOS',
       order: 12,
-      name: 'Regla 12: Cuentas por Cobrar Socios (Retiros del Dueño)',
+      name: 'Regla 12 (ND): Retiros de Socios / Directores',
       ruleType: 'ND',
       targetAccountCode: '1.1.2.2.30',
       targetAccountName: 'Cuentas por Cobrar Socios y Directores',
       contraAccountCode: '1.1.1.2.10',
-      contraAccountName: 'Banesco Banco Universal Cta Corriente',
-      descriptionPatterns: [
-        'RETIRO SOCIO',
-        'PAGO SOCIO',
-        'PRESTAMO A SOCIO',
-        'RETIRO PERSONAL'
-      ],
-      notes: 'Monto negativo (-). Retiro personal de socio imputado a cuenta de activo exigible 1.1.2.2.30.'
+      contraAccountName: 'Banesco Banco Universal',
+      descriptionPatterns: ['RETIRO SOCIO', 'PAGO SOCIO', 'PRESTAMO A SOCIO', 'RETIRO PERSONAL']
     }
   ]
 };
+
+/**
+ * Aplica formato numérico estándar de 2 decimales a la columna MONTO (E)
+ * garantizando compatibilidad con fórmulas de suma en Excel y sistemas contables.
+ */
+function applyNumericFormatToColumnE(worksheet: XLSX.WorkSheet): void {
+  Object.keys(worksheet).forEach(cellRef => {
+    if (cellRef.startsWith('E') && cellRef !== 'E1' && worksheet[cellRef]) {
+      worksheet[cellRef].z = '#,##0.00;(#,##0.00);0.00';
+    }
+  });
+}
+
+/**
+ * GENERADOR EXACTO DE ASIENTOS CONTABLES PARA BANCO BANESCO (0134)
+ * Según el prompt oficial y el modelo de referencia: genera asientos_generados.xlsx con:
+ * - Hoja 1 (NC): Notas de crédito y contrapartida Cuentas por Cobrar 1.1.2.1.10
+ * - Hoja 2 (ND): Notas débito clasificadas en positivo (+) y contrapartidas de Banco 1.1.1.2.10 en negativo (-)
+ * - Hoja 3 (ND + ND): Unificación de todas las transacciones de NC y ND con las contrapartidas balanceadas a 0.00
+ * - Columnas: CUENTA CONTABLE | DESCRIPCION | TIPO | REFERENCIA | MONTO
+ * - Sin columna Fecha
+ */
+export function generateBanescoAsientosExcel(
+  transactions: BankTransaction[],
+  company?: Partial<UserCompanyProfile>,
+  currency: CurrencyType = 'VES'
+): void {
+  const wb = XLSX.utils.book_new();
+
+  // Filtrar movimientos bancarios de Banesco o del estado de cuenta activo
+  const banescoTxs = transactions.filter(t =>
+    t.source === 'BANK' &&
+    t.currency === currency &&
+    (!t.bankCode || t.bankCode === '0134' || t.bankCode === 'ALL' || t.bankName?.toLowerCase().includes('banesco'))
+  );
+
+  const headerRow = ['CUENTA CONTABLE', 'DESCRIPCION', 'TIPO', 'REFERENCIA', 'MONTO'];
+  const todayFormatted = formatToVenezuelanDateHyphen(new Date());
+
+  // -------------------------------------------------------------
+  // HOJA 1 (NC) – Notas de Crédito (montos positivos)
+  // -------------------------------------------------------------
+  const ncList = banescoTxs.filter(t => t.txType === 'CREDIT' || t.amountNominal > 0);
+  const sheet1Rows: (string | number)[][] = [headerRow];
+  let totalNC = 0;
+
+  ncList.forEach(tx => {
+    const amtPos = Number(Math.abs(tx.amountNominal).toFixed(2));
+    totalNC += amtPos;
+    sheet1Rows.push([
+      '1.1.1.2.10',
+      tx.rawDescription,
+      'NC',
+      tx.referenceNum,
+      amtPos
+    ]);
+  });
+
+  // Contrapartida al final de la Hoja 1 (según modelo CSV y prompt oficial):
+  // CUENTA CONTABLE: 1.1.2.1.10 (Cuentas por cobrar).
+  // DESCRIPCION: "CUENTAS POR COBRAR" (o "Cuentas por cobrar (contrapartida NC)").
+  // TIPO: NC.
+  // REFERENCIA: "RES-[fecha actual en formato DD-MM-AAAA]".
+  // MONTO: La suma total de las NC, en negativo para que el asiento cierre en cero exacto.
+  if (ncList.length > 0) {
+    sheet1Rows.push([
+      '1.1.2.1.10',
+      'CUENTAS POR COBRAR',
+      'NC',
+      `RES-${todayFormatted}`,
+      -Number(totalNC.toFixed(2))
+    ]);
+  }
+
+  const wsSheet1 = XLSX.utils.aoa_to_sheet(sheet1Rows);
+  applyNumericFormatToColumnE(wsSheet1);
+  wsSheet1['!cols'] = [
+    { wch: 18 }, // CUENTA CONTABLE
+    { wch: 48 }, // DESCRIPCION
+    { wch: 10 }, // TIPO
+    { wch: 20 }, // REFERENCIA
+    { wch: 18 }  // MONTO
+  ];
+
+  // -------------------------------------------------------------
+  // HOJA 2 (ND) – Notas Débito (montos negativos)
+  // -------------------------------------------------------------
+  const ndList = banescoTxs.filter(t => t.txType === 'DEBIT' || t.amountNominal < 0);
+  const sheet2Rows: (string | number)[][] = [headerRow];
+
+  // Bloque 1: Cuentas según reglas en positivo (+)
+  ndList.forEach(tx => {
+    const res = classifyTransactionByBankRules(tx.rawDescription, tx.amountNominal, 'DEBIT', '0134');
+    const amtPos = Number(Math.abs(tx.amountNominal).toFixed(2));
+    sheet2Rows.push([
+      res.accountCode,
+      tx.rawDescription,
+      'ND',
+      tx.referenceNum,
+      amtPos
+    ]);
+  });
+
+  // Bloque 2: Copia a partir de la primera fila en blanco (según modelo CSV de producción):
+  // Cuenta contable 1.1.1.2.10 (Banco), descripción de la fila correspondiente, tipo ND, referencia original, monto en negativo (-)
+  ndList.forEach(tx => {
+    const amtNeg = Number((-Math.abs(tx.amountNominal)).toFixed(2));
+    sheet2Rows.push([
+      '1.1.1.2.10',
+      tx.rawDescription || 'BANESCO',
+      'ND',
+      tx.referenceNum,
+      amtNeg
+    ]);
+  });
+
+  const wsSheet2 = XLSX.utils.aoa_to_sheet(sheet2Rows);
+  applyNumericFormatToColumnE(wsSheet2);
+  wsSheet2['!cols'] = [
+    { wch: 18 },
+    { wch: 48 },
+    { wch: 10 },
+    { wch: 20 },
+    { wch: 18 }
+  ];
+
+  // -------------------------------------------------------------
+  // HOJA 3 (ND + ND) – Unificación de NC y ND
+  // -------------------------------------------------------------
+  const sheet3Rows: (string | number)[][] = [headerRow];
+
+  // Filas de Hoja 1 (NC)
+  for (let i = 1; i < sheet1Rows.length; i++) {
+    sheet3Rows.push(sheet1Rows[i]);
+  }
+
+  // Filas de Hoja 2 (ND)
+  for (let i = 1; i < sheet2Rows.length; i++) {
+    sheet3Rows.push(sheet2Rows[i]);
+  }
+
+  const wsSheet3 = XLSX.utils.aoa_to_sheet(sheet3Rows);
+  applyNumericFormatToColumnE(wsSheet3);
+  wsSheet3['!cols'] = [
+    { wch: 18 },
+    { wch: 48 },
+    { wch: 10 },
+    { wch: 20 },
+    { wch: 18 }
+  ];
+
+  // Agregar las 3 hojas al Libro Excel
+  XLSX.utils.book_append_sheet(wb, wsSheet1, 'Hoja 1 (NC)');
+  XLSX.utils.book_append_sheet(wb, wsSheet2, 'Hoja 2 (ND)');
+  XLSX.utils.book_append_sheet(wb, wsSheet3, 'Hoja 3 (ND + ND)');
+
+  // Descarga como asientos_generados.xlsx
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'asientos_generados.xlsx';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * GENERADOR EXACTO DE ASIENTOS CONTABLES PARA BANCO DE VENEZUELA (0102)
+ * Según el prompt oficial y el modelo de referencia: genera asientos_generados.xlsx con:
+ * - Hoja 1 (NC): Notas de crédito y contrapartida Cuentas por Cobrar 1.1.2.1.10
+ * - Hoja 2 (ND): Notas débito clasificadas en positivo (+) y contrapartidas de Banco (1.1.1.2.20) en negativo (-)
+ * - Hoja 3 (ND + ND): Unificación de todas las transacciones de NC y ND con las contrapartidas balanceadas a 0.00
+ * - Columnas: CUENTA CONTABLE | DESCRIPCION | TIPO | REFERENCIA | MONTO
+ * - Sin columna Fecha
+ */
+export function generateBdvAsientosExcel(
+  transactions: BankTransaction[],
+  company?: Partial<UserCompanyProfile>,
+  currency: CurrencyType = 'VES'
+): void {
+  const wb = XLSX.utils.book_new();
+
+  // Filtrar movimientos bancarios de Banco de Venezuela
+  const bdvTxs = transactions.filter(t =>
+    t.source === 'BANK' &&
+    t.currency === currency &&
+    (!t.bankCode || t.bankCode === '0102' || t.bankCode === 'ALL' || t.bankName?.toLowerCase().includes('venezuela') || t.bankName?.toLowerCase().includes('bdv'))
+  );
+
+  const headerRow = ['CUENTA CONTABLE', 'DESCRIPCION', 'TIPO', 'REFERENCIA', 'MONTO'];
+  const todayFormatted = formatToVenezuelanDateHyphen(new Date());
+
+  // -------------------------------------------------------------
+  // HOJA 1 (NC) – Notas de Crédito (montos positivos)
+  // Cuenta contable: 1.1.1.2.20 (Banco de Venezuela)
+  // -------------------------------------------------------------
+  const ncList = bdvTxs.filter(t => t.txType === 'CREDIT' || t.amountNominal > 0);
+  const sheet1Rows: (string | number)[][] = [headerRow];
+  let totalNC = 0;
+
+  ncList.forEach(tx => {
+    const amtPos = Number(Math.abs(tx.amountNominal).toFixed(2));
+    totalNC += amtPos;
+    sheet1Rows.push([
+      '1.1.1.2.20',
+      tx.rawDescription || 'VENEZUELA',
+      'NC',
+      tx.referenceNum,
+      amtPos
+    ]);
+  });
+
+  // Contrapartida al final de la Hoja 1 (según modelo CSV):
+  // CUENTA CONTABLE: 1.1.2.1.10 (Cuentas por cobrar).
+  // DESCRIPCION: "CUENTAS POR COBRAR".
+  // TIPO: NC.
+  // REFERENCIA: "RES-[fecha actual en formato DD-MM-AAAA]".
+  // MONTO: La suma total de las NC, en negativo para que el asiento cierre en cero exacto.
+  if (ncList.length > 0) {
+    sheet1Rows.push([
+      '1.1.2.1.10',
+      'CUENTAS POR COBRAR',
+      'NC',
+      `RES-${todayFormatted}`,
+      -Number(totalNC.toFixed(2))
+    ]);
+  }
+
+  const wsSheet1 = XLSX.utils.aoa_to_sheet(sheet1Rows);
+  applyNumericFormatToColumnE(wsSheet1);
+  wsSheet1['!cols'] = [
+    { wch: 18 }, // CUENTA CONTABLE
+    { wch: 48 }, // DESCRIPCION
+    { wch: 10 }, // TIPO
+    { wch: 20 }, // REFERENCIA
+    { wch: 18 }  // MONTO
+  ];
+
+  // -------------------------------------------------------------
+  // HOJA 2 (ND) – Notas Débito (montos negativos)
+  // Regla 1 (Comisiones): 6.1.2.5.02 (contra 1.1.1.2.20 VENEZUELA)
+  // Regla 2 (Compras/Servicios): 2.1.1.1.10 (contra 1.1.1.2.20 VENEZUELA)
+  // -------------------------------------------------------------
+  const ndList = bdvTxs.filter(t => t.txType === 'DEBIT' || t.amountNominal < 0);
+  const sheet2Rows: (string | number)[][] = [headerRow];
+
+  // Bloque 1: Cuentas según reglas en positivo (+)
+  ndList.forEach(tx => {
+    const res = classifyTransactionByBankRules(tx.rawDescription, tx.amountNominal, 'DEBIT', '0102');
+    const amtPos = Number(Math.abs(tx.amountNominal).toFixed(2));
+    sheet2Rows.push([
+      res.accountCode, // 6.1.2.5.02, 2.1.1.1.10, etc.
+      tx.rawDescription,
+      'ND',
+      tx.referenceNum,
+      amtPos
+    ]);
+  });
+
+  // Bloque 2: Copia a partir de la primera fila en blanco (según modelo CSV lines 494-573):
+  // Contrapartida automática: código 1.1.1.2.20 (Banco), descripción VENEZUELA, tipo ND, referencia original, monto en negativo (-)
+  ndList.forEach(tx => {
+    const amtNeg = Number((-Math.abs(tx.amountNominal)).toFixed(2));
+    sheet2Rows.push([
+      '1.1.1.2.20',
+      'VENEZUELA',
+      'ND',
+      tx.referenceNum,
+      amtNeg
+    ]);
+  });
+
+  const wsSheet2 = XLSX.utils.aoa_to_sheet(sheet2Rows);
+  applyNumericFormatToColumnE(wsSheet2);
+  wsSheet2['!cols'] = [
+    { wch: 18 },
+    { wch: 48 },
+    { wch: 10 },
+    { wch: 20 },
+    { wch: 18 }
+  ];
+
+  // -------------------------------------------------------------
+  // HOJA 3 (ND + ND) – Unificación de NC y ND
+  // -------------------------------------------------------------
+  const sheet3Rows: (string | number)[][] = [headerRow];
+
+  // Filas de Hoja 1 (NC)
+  for (let i = 1; i < sheet1Rows.length; i++) {
+    sheet3Rows.push(sheet1Rows[i]);
+  }
+
+  // Filas de Hoja 2 (ND)
+  for (let i = 1; i < sheet2Rows.length; i++) {
+    sheet3Rows.push(sheet2Rows[i]);
+  }
+
+  const wsSheet3 = XLSX.utils.aoa_to_sheet(sheet3Rows);
+  applyNumericFormatToColumnE(wsSheet3);
+  wsSheet3['!cols'] = [
+    { wch: 18 },
+    { wch: 48 },
+    { wch: 10 },
+    { wch: 20 },
+    { wch: 18 }
+  ];
+
+  // Agregar las 3 hojas al Libro Excel
+  XLSX.utils.book_append_sheet(wb, wsSheet1, 'Hoja 1 (NC)');
+  XLSX.utils.book_append_sheet(wb, wsSheet2, 'Hoja 2 (ND)');
+  XLSX.utils.book_append_sheet(wb, wsSheet3, 'Hoja 3 (ND + ND)');
+
+  // Descarga como asientos_generados.xlsx
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'asientos_generados.xlsx';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 // -------------------------------------------------------------
 // 5. BANCAMIGA BANCO UNIVERSAL (0172) - SEGÚN PROMPT OFICIAL
@@ -1278,6 +1753,18 @@ export function generateBankLedgerExcel(
   company?: Partial<UserCompanyProfile>,
   currency: CurrencyType = 'VES'
 ): void {
+  // Para Banco de Venezuela (0102), generar según el prompt oficial: asientos_generados.xlsx con las 3 hojas requeridas
+  if (bankCode === '0102') {
+    generateBdvAsientosExcel(transactions, company, currency);
+    return;
+  }
+
+  // Para Banesco (0134), generar según el prompt oficial: asientos_generados.xlsx con las 3 hojas requeridas
+  if (bankCode === '0134') {
+    generateBanescoAsientosExcel(transactions, company, currency);
+    return;
+  }
+
   const bankDef = getBankRulesDefinition(bankCode);
   const wb = XLSX.utils.book_new();
 

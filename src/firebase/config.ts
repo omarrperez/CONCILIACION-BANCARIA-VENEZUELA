@@ -1,51 +1,40 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer, collection, getDocs, setDoc, updateDoc, deleteDoc, query, where, onSnapshot } from 'firebase/firestore';
-// Safe dynamic resolution of firebase-applet-config.json without failing Vite build on Netlify if file is missing
-const appletConfigModules = import.meta.glob(
-  [
-    '../../firebase-applet-config.json',
-    '../firebase-applet-config.json',
-    './firebase-applet-config.json',
-    '/firebase-applet-config.json'
-  ],
-  { eager: true, import: 'default' }
-) as Record<string, any>;
-
-const rawAppletConfig = Object.values(appletConfigModules)[0] || {};
+import appletConfig from './firebase-applet-config.json';
 
 const projectId =
   import.meta.env.VITE_FIREBASE_PROJECT_ID ||
-  rawAppletConfig?.projectId ||
-  'nominus-venezuela-bancaria';
+  appletConfig?.projectId ||
+  'shaped-extension-qptg6';
 
 const databaseId =
   import.meta.env.VITE_FIREBASE_DATABASE_ID ||
-  rawAppletConfig?.firestoreDatabaseId ||
-  '(default)';
+  appletConfig?.firestoreDatabaseId ||
+  'ai-studio-8e50d3b3-47bc-4226-b17c-67741752ed3c';
 
 const activeConfig = {
   apiKey:
     import.meta.env.VITE_FIREBASE_API_KEY ||
-    rawAppletConfig?.apiKey ||
-    'AIzaSyDummyApiKeyForStudioPreviewEnvironmentOnly12345',
+    appletConfig?.apiKey ||
+    'AIzaSyD_xiPV0GQEnSmHF3O1VSj0fyJ0JOhGjRU',
   authDomain:
     import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ||
-    rawAppletConfig?.authDomain ||
+    appletConfig?.authDomain ||
     `${projectId}.firebaseapp.com`,
   projectId: projectId,
   storageBucket:
     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ||
-    rawAppletConfig?.storageBucket ||
-    `${projectId}.appspot.com`,
+    appletConfig?.storageBucket ||
+    `${projectId}.firebasestorage.app`,
   messagingSenderId:
     import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ||
-    rawAppletConfig?.messagingSenderId ||
-    '257746239607',
+    appletConfig?.messagingSenderId ||
+    '16349165750',
   appId:
     import.meta.env.VITE_FIREBASE_APP_ID ||
-    rawAppletConfig?.appId ||
-    '1:257746239607:web:8e50d3b347bc4226b17c67',
+    appletConfig?.appId ||
+    '1:16349165750:web:ae4040cf609541beeace17',
   firestoreDatabaseId: databaseId,
 };
 
