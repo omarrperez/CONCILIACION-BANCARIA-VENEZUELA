@@ -225,6 +225,14 @@ export interface CashDenominationCount {
   total: number;
 }
 
+export interface PettyCashExpenseItem {
+  id: string;
+  concept: string; // e.g. "Agua potable", "Resma de papel", "Timbre fiscal", "Pasaje empleado"
+  amount: number;
+  category?: string;
+  receiptNum?: string;
+}
+
 export interface CashLogRecord {
   id: string;
   userId?: string;
@@ -235,6 +243,7 @@ export interface CashLogRecord {
   initialBalance: number;
   totalSales: number;
   pettyCashExpenses: number;
+  expenseItems?: PettyCashExpenseItem[];
   expectedTotal: number;
   physicalCount: number;
   difference: number; // physical - expected

@@ -13,8 +13,12 @@ import {
   Edit3,
   ShieldCheck,
   Zap,
-  HelpCircle
+  HelpCircle,
+  FileText,
+  Download
 } from 'lucide-react';
+import { exportManualToWord } from '../services/exportService';
+import { UserCompanyProfile } from '../types/accounting';
 
 interface OnboardingModalProps {
   isOpen: boolean;
@@ -22,6 +26,7 @@ interface OnboardingModalProps {
   onStartUpload?: (source: 'BANK' | 'LEDGER') => void;
   onNavigateToWorkspace?: () => void;
   onNavigateToResults?: () => void;
+  company?: UserCompanyProfile;
 }
 
 export const OnboardingModal: React.FC<OnboardingModalProps> = ({
@@ -29,10 +34,25 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   onClose,
   onStartUpload,
   onNavigateToWorkspace,
-  onNavigateToResults
+  onNavigateToResults,
+  company
 }) => {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [dontShowAgain, setDontShowAgain] = useState<boolean>(false);
+
+  const defaultCompany: UserCompanyProfile = company || {
+    id: 'default',
+    companyName: 'MI EMPRESA, C.A.',
+    companyRif: 'J-00000000-0',
+    address: 'Caracas, Venezuela',
+    isSpecialTaxpayer: true,
+    vatRetentionRate: 75,
+    defaultCurrency: 'VES',
+    bcvRate: 56.80,
+    accountingSystemTarget: 'SGT',
+    bankAccounts: [],
+    createdAt: new Date().toISOString()
+  };
 
   if (!isOpen) return null;
 
@@ -154,6 +174,25 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 Descarga archivos listos para importar en Profit Plus, Gálac, Saint, Valery o Excel.
               </p>
             </div>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+            <div className="space-y-0.5">
+              <span className="font-extrabold text-blue-950 flex items-center gap-1.5">
+                <FileText className="w-4 h-4 text-blue-700" />
+                <span>Manual de Procedimientos y Guía de Usuario</span>
+              </span>
+              <p className="text-[11px] text-blue-800">
+                Documento en Word (.DOC) en lenguaje sencillo para cualquier persona con instructivos, Telegram y firmas de aprobación.
+              </p>
+            </div>
+            <button
+              onClick={() => exportManualToWord(defaultCompany)}
+              className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer shrink-0 flex items-center gap-1.5"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Descargar Manual (.doc)</span>
+            </button>
           </div>
 
           <div className="p-3 rounded-xl bg-slate-900 text-white text-xs flex items-center justify-between">

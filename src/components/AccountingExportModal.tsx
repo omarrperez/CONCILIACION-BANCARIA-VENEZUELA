@@ -24,7 +24,9 @@ import {
   exportSeniatWithholdingTxt,
   triggerFileDownload,
   exportToOfficialBankLedgerExcel,
-  exportToReconciliationProofExcel
+  exportToReconciliationProofExcel,
+  exportToJustificationAndRepositoryExcel,
+  exportManualToWord
 } from '../services/exportService';
 
 interface AccountingExportModalProps {
@@ -45,7 +47,7 @@ export const AccountingExportModal: React.FC<AccountingExportModalProps> = ({
   proofOfCash
 }) => {
   const [selectedFormat, setSelectedFormat] = useState<
-    'RECONCILIATION_PROOF_EXCEL' | 'BANK_LEDGER_3SHEETS' | 'SGT_EXCEL' | 'SGT_BATCH' | 'PROFIT' | 'GALAC' | 'SAINT' | 'VALERY' | 'CSV' | 'SENIAT_TXT'
+    'RECONCILIATION_PROOF_EXCEL' | 'JUSTIFICATION_REPOSITORY_EXCEL' | 'MANUAL_WORD' | 'BANK_LEDGER_3SHEETS' | 'SGT_EXCEL' | 'SGT_BATCH' | 'PROFIT' | 'GALAC' | 'SAINT' | 'VALERY' | 'CSV' | 'SENIAT_TXT'
   >('RECONCILIATION_PROOF_EXCEL');
 
   const [downloadSuccess, setDownloadSuccess] = useState(false);
@@ -99,6 +101,25 @@ export const AccountingExportModal: React.FC<AccountingExportModalProps> = ({
           transactions,
           currency: 'VES'
         });
+        setDownloadSuccess(true);
+        setTimeout(() => setDownloadSuccess(false), 3000);
+        return;
+      }
+
+      case 'JUSTIFICATION_REPOSITORY_EXCEL': {
+        exportToJustificationAndRepositoryExcel({
+          company,
+          transactions,
+          currency: 'VES',
+          bcvRate: company.bcvRate
+        });
+        setDownloadSuccess(true);
+        setTimeout(() => setDownloadSuccess(false), 3000);
+        return;
+      }
+
+      case 'MANUAL_WORD': {
+        exportManualToWord(company);
         setDownloadSuccess(true);
         setTimeout(() => setDownloadSuccess(false), 3000);
         return;
@@ -173,6 +194,22 @@ export const AccountingExportModal: React.FC<AccountingExportModalProps> = ({
       ext: '.XLSX',
       recommended: true,
       color: 'emerald'
+    },
+    {
+      id: 'JUSTIFICATION_REPOSITORY_EXCEL' as const,
+      title: '📗 Repositorios y Justificación Contable / Tributaria (Excel .XLSX)',
+      desc: 'Reporte ejecutivo en Excel con 3 Hojas para revisión SENIAT: Matriz resumen de las 16 categorías clasificadas en el estado de cuenta, listado analítico de todas las operaciones por repositorio e inventario de soportes digitales anexados (Telegram/Cargados).',
+      ext: '.XLSX',
+      recommended: true,
+      color: 'teal'
+    },
+    {
+      id: 'MANUAL_WORD' as const,
+      title: '📄 Manual de Procedimientos y Guía de Usuario (Word .DOCX / .DOC)',
+      desc: 'Manual operativo paso a paso escrito en lenguaje sencillo para cualquier usuario o directivo. Incluye instructivo de carga de extractos y libros, bot de Telegram, inventario de soportes, normativas Ven-NIF/SENIAT y planilla formal de aprobación con firmas.',
+      ext: '.DOC',
+      recommended: true,
+      color: 'blue'
     },
     {
       id: 'BANK_LEDGER_3SHEETS' as const,

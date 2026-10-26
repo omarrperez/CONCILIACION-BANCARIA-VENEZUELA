@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx-js-style';
-import { BankTransaction, CurrencyType, JournalEntry, ProofOfCash, UserCompanyProfile } from '../types/accounting';
+import { BankTransaction, CashDenominationCount, CashLogRecord, CurrencyType, DigitalSupportAttachment, JournalEntry, PettyCashExpenseItem, ProofOfCash, UserCompanyProfile } from '../types/accounting';
 import {
   SGT_CONTABLE_ACCOUNTS,
   mapVenNifToSgtContable
@@ -1114,6 +1114,800 @@ export function exportToReconciliationProofExcel(params: {
   const timestamp = now.toISOString().slice(0, 10).replace(/-/g, '');
   const cleanRif = companyRif.replace(/[^A-Za-z0-9]/g, '');
   a.download = `CEDULA_CUADRE_CONCILIACION_${cleanRif}_${timestamp}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * EXPORTACIÓN A EXCEL (.XLSX) DEL MÓDULO DE JUSTIFICACIÓN CONTABLE, TRIBUTARIA Y REPOSITORIO DE SOPORTES
+ * Genera un reporte institucional en Excel con 3 hojas estructuradas y estilizadas para fiscalización SENIAT:
+ * 1. "Resumen_Por_Repositorios": Resumen de cada categoría/módulo, cantidad de partidas, montos en Bs./USD y % cobertura de soportes.
+ * 2. "Detalle_Operaciones": Listado exhaustivo de todas las operaciones bancarias agrupadas por su categoría/repositorio con estado probatorio.
+ * 3. "Inventario_De_Soportes": Inventario de todos los archivos y comprobantes cargados/recibidos por Telegram con metadata de IA.
+ */
+export function exportToJustificationAndRepositoryExcel(params: {
+  company: UserCompanyProfile;
+  transactions: BankTransaction[];
+  currency: CurrencyType;
+  bcvRate: number;
+  digitalSupports?: DigitalSupportAttachment[];
+}): void {
+  const { company, transactions, currency, bcvRate, digitalSupports = [] } = params;
+  const wb = XLSX.utils.book_new();
+
+  const companyName = company.companyName || 'EMPRESA CONTRIBUYENTE C.A.';
+  const companyRif = company.companyRif || 'J-00000000-0';
+  const now = new Date();
+  const dateFormatted = formatToVenezuelanDateHyphen(now);
+
+  // Estilos visuales institucionales
+  const styleHeaderBanner = {
+    font: { name: 'Arial', sz: 12, bold: true, color: { rgb: 'FFFFFF' } },
+    fill: { fgColor: { rgb: '0F2942' } },
+    alignment: { horizontal: 'center', vertical: 'center' }
+  };
+
+  const styleSubBanner = {
+    font: { name: 'Arial', sz: 10, bold: true, color: { rgb: 'E2E8F0' } },
+    fill: { fgColor: { rgb: '1E293B' } },
+    alignment: { horizontal: 'center', vertical: 'center' }
+  };
+
+  const styleSectionBar = {
+    font: { name: 'Arial', sz: 10, bold: true, color: { rgb: '0F172A' } },
+    fill: { fgColor: { rgb: 'E2E8F0' } },
+    alignment: { horizontal: 'left', vertical: 'center' }
+  };
+
+  const styleTh = {
+    font: { name: 'Arial', sz: 9, bold: true, color: { rgb: 'FFFFFF' } },
+    fill: { fgColor: { rgb: '1E3A8A' } },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border: {
+      top: { style: 'thin', color: { rgb: 'CBD5E1' } },
+      bottom: { style: 'medium', color: { rgb: '1E3A8A' } }
+    }
+  };
+
+  const styleTdText = {
+    font: { name: 'Arial', sz: 9, color: { rgb: '1E293B' } },
+    alignment: { horizontal: 'left', vertical: 'center' },
+    border: {
+      top: { style: 'thin', color: { rgb: 'E2E8F0' } },
+      bottom: { style: 'thin', color: { rgb: 'E2E8F0' } },
+      left: { style: 'thin', color: { rgb: 'E2E8F0' } },
+      right: { style: 'thin', color: { rgb: 'E2E8F0' } }
+    }
+  };
+
+  const styleTdCenter = {
+    font: { name: 'Arial', sz: 9, color: { rgb: '1E293B' } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: {
+      top: { style: 'thin', color: { rgb: 'E2E8F0' } },
+      bottom: { style: 'thin', color: { rgb: 'E2E8F0' } },
+      left: { style: 'thin', color: { rgb: 'E2E8F0' } },
+      right: { style: 'thin', color: { rgb: 'E2E8F0' } }
+    }
+  };
+
+  const styleTdNum = {
+    font: { name: 'Arial', sz: 9, color: { rgb: '1E293B' } },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: {
+      top: { style: 'thin', color: { rgb: 'E2E8F0' } },
+      bottom: { style: 'thin', color: { rgb: 'E2E8F0' } },
+      left: { style: 'thin', color: { rgb: 'E2E8F0' } },
+      right: { style: 'thin', color: { rgb: 'E2E8F0' } }
+    }
+  };
+
+  const styleTotalRow = {
+    font: { name: 'Arial', sz: 10, bold: true, color: { rgb: '0F172A' } },
+    fill: { fgColor: { rgb: 'EFF6FF' } },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: {
+      top: { style: 'medium', color: { rgb: '1E3A8A' } },
+      bottom: { style: 'double', color: { rgb: '1E3A8A' } },
+      left: { style: 'thin', color: { rgb: 'CBD5E1' } },
+      right: { style: 'thin', color: { rgb: 'CBD5E1' } }
+    }
+  };
+
+  // ----------------------------------------------------
+  // HOJA 1: RESUMEN POR REPOSITORIOS Y CATEGORÍAS
+  // ----------------------------------------------------
+  const ws1: any = {};
+  const merges1: any[] = [];
+  const rows1: any[] = [];
+
+  function set1Cell(r: number, c: number, val: any, style: any, t: string = 's') {
+    const addr = XLSX.utils.encode_cell({ r, c });
+    ws1[addr] = { t, v: val ?? '', s: style || {} };
+  }
+
+  function merge1(r1: number, c1: number, r2: number, c2: number, val: any, style: any, t: string = 's') {
+    merges1.push({ s: { r: r1, c: c1 }, e: { r: r2, c: c2 } });
+    for (let r = r1; r <= r2; r++) {
+      for (let c = c1; c <= c2; c++) {
+        set1Cell(r, c, (r === r1 && c === c1) ? val : '', style, t);
+      }
+    }
+  }
+
+  let r1Idx = 0;
+  merge1(r1Idx, 0, r1Idx, 7, 'MATRIZ DE JUSTIFICACIÓN CONTABLE, TRIBUTARIA Y REPOSITORIO DE SOPORTES', styleHeaderBanner);
+  rows1.push({ hpt: 28 });
+  r1Idx++;
+
+  merge1(r1Idx, 0, r1Idx, 7, `EMPRESA: ${companyName} | RIF: ${companyRif} | TASA BCV: Bs. ${bcvRate.toFixed(2)} | FECHA EMISIÓN: ${dateFormatted}`, styleSubBanner);
+  rows1.push({ hpt: 20 });
+  r1Idx++;
+
+  rows1.push({ hpt: 10 });
+  r1Idx++;
+
+  merge1(r1Idx, 0, r1Idx, 7, 'I. CLASIFICACIÓN DE MOVIMIENTOS Y COBERTURA PROBATORIA POR CATEGORÍA DE REPOSITORIO', styleSectionBar);
+  rows1.push({ hpt: 22 });
+  r1Idx++;
+
+  const h1 = ['CÓDIGO REPOSITORIO', 'CATEGORÍA / MÓDULO OPERATIVO', 'NATURALEZA', 'CANT. MOVIMIENTOS', 'MONTO TOTAL (Bs.)', 'EQUIV. USD ($)', 'CON SOPORTE', '% COBERTURA PROBATORIA'];
+  h1.forEach((colTitle, c) => set1Cell(r1Idx, c, colTitle, styleTh));
+  rows1.push({ hpt: 24 });
+  r1Idx++;
+
+  const bankTxs = transactions.filter(t => t.source === 'BANK' && t.currency === currency);
+
+  // Group stats by module
+  const moduleCatalog = [
+    { id: 'MOD_VENTAS', title: 'Cobro de Facturas / Ventas', nature: 'Entrada (+)' },
+    { id: 'MOD_USD_IN', title: 'Ingresos en Divisas', nature: 'Entrada (+)' },
+    { id: 'MOD_TFR_PROPIAS_IN', title: 'Transferencias Propias (Entradas)', nature: 'Entrada (+)' },
+    { id: 'MOD_SOCIOS_IN', title: 'Aportes y Préstamos de Socios', nature: 'Entrada (+)' },
+    { id: 'MOD_POS', title: 'Liquidación Puntos de Venta (POS)', nature: 'Entrada (+)' },
+    { id: 'MOD_PRESTAMOS_IN', title: 'Créditos Bancarios Recibidos', nature: 'Entrada (+)' },
+    { id: 'MOD_PROVEEDORES', title: 'Pago a Proveedores Locales', nature: 'Salida (-)' },
+    { id: 'MOD_USD_OUT', title: 'Salidas en Divisas / Importaciones', nature: 'Salida (-)' },
+    { id: 'MOD_CXC_SOCIOS', title: 'Cuentas por Cobrar Socios (Gastos)', nature: 'Salida (-)' },
+    { id: 'MOD_CXP_SOCIOS', title: 'Devolución Préstamos Socios', nature: 'Salida (-)' },
+    { id: 'MOD_TFR_PROPIAS_OUT', title: 'Transferencias Propias (Salidas)', nature: 'Salida (-)' },
+    { id: 'MOD_ANTICIPOS', title: 'Anticipos y Retenciones Compras', nature: 'Salida (-)' },
+    { id: 'MOD_NOMINA', title: 'Nómina y Ley de Pensiones 2024', nature: 'Salida (-)' },
+    { id: 'MOD_SENIAT_PAGO', title: 'Tributos SENIAT y Municipales', nature: 'Salida (-)' },
+    { id: 'MOD_COMISIONES', title: 'Comisiones y Gastos Bancarios', nature: 'Salida (-)' },
+    { id: 'MOD_HUERFANOS', title: 'Carpeta de Huérfanos (Pendientes)', nature: 'Por Clasificar' }
+  ];
+
+  let totCount = 0;
+  let totVes = 0;
+  let totUsd = 0;
+  let totWithSupp = 0;
+
+  moduleCatalog.forEach((mod, i) => {
+    const modTxs = bankTxs.filter(t => (t.moduleTag || 'MOD_HUERFANOS') === mod.id);
+    const count = modTxs.length;
+    const ves = modTxs.reduce((acc, t) => acc + (t.amountVes || (t.currency === 'VES' ? t.amountNominal : t.amountNominal * bcvRate)), 0);
+    const usd = modTxs.reduce((acc, t) => acc + (t.amountUsdEquivalent || (t.currency === 'USD' ? t.amountNominal : t.amountNominal / bcvRate)), 0);
+    const withSupp = modTxs.filter(t => (t.attachments && t.attachments.length > 0) || t.matchingStatus === 'MATCHED_EXACT').length;
+    const covPct = count > 0 ? Math.round((withSupp / count) * 100) : 0;
+
+    totCount += count;
+    totVes += ves;
+    totUsd += usd;
+    totWithSupp += withSupp;
+
+    const zebraStyle = i % 2 === 0 ? styleTdText : { ...styleTdText, fill: { fgColor: { rgb: 'F8FAFC' } } };
+    const zebraCenter = i % 2 === 0 ? styleTdCenter : { ...styleTdCenter, fill: { fgColor: { rgb: 'F8FAFC' } } };
+    const zebraNum = i % 2 === 0 ? styleTdNum : { ...styleTdNum, fill: { fgColor: { rgb: 'F8FAFC' } } };
+
+    set1Cell(r1Idx, 0, mod.id, zebraCenter);
+    set1Cell(r1Idx, 1, mod.title, zebraStyle);
+    set1Cell(r1Idx, 2, mod.nature, zebraCenter);
+    set1Cell(r1Idx, 3, count, zebraCenter);
+    set1Cell(r1Idx, 4, formatVenezuelanNumber(ves), zebraNum);
+    set1Cell(r1Idx, 5, formatVenezuelanNumber(usd), zebraNum);
+    set1Cell(r1Idx, 6, withSupp, zebraCenter);
+    set1Cell(r1Idx, 7, `${covPct}%`, zebraCenter);
+    rows1.push({ hpt: 20 });
+    r1Idx++;
+  });
+
+  // Total row
+  const globalCov = totCount > 0 ? Math.round((totWithSupp / totCount) * 100) : 0;
+  set1Cell(r1Idx, 0, 'TOTAL', styleTotalRow);
+  set1Cell(r1Idx, 1, 'TOTAL GENERAL ESTADO DE CUENTA BANCARIO', styleTotalRow);
+  set1Cell(r1Idx, 2, 'GLOBAL', styleTotalRow);
+  set1Cell(r1Idx, 3, totCount, styleTotalRow);
+  set1Cell(r1Idx, 4, formatVenezuelanNumber(totVes), styleTotalRow);
+  set1Cell(r1Idx, 5, formatVenezuelanNumber(totUsd), styleTotalRow);
+  set1Cell(r1Idx, 6, totWithSupp, styleTotalRow);
+  set1Cell(r1Idx, 7, `${globalCov}%`, styleTotalRow);
+  rows1.push({ hpt: 24 });
+  r1Idx++;
+
+  ws1['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r1Idx, c: 7 } });
+  ws1['!merges'] = merges1;
+  ws1['!rows'] = rows1;
+  ws1['!cols'] = [
+    { wch: 22 }, // Codigo
+    { wch: 42 }, // Titulo
+    { wch: 18 }, // Nature
+    { wch: 18 }, // Cantidad
+    { wch: 24 }, // Monto Bs
+    { wch: 20 }, // Monto USD
+    { wch: 16 }, // Con soporte
+    { wch: 22 }  // Cobertura
+  ];
+
+  // ----------------------------------------------------
+  // HOJA 2: DETALLE DE OPERACIONES BANCARIAS POR REPOSITORIO
+  // ----------------------------------------------------
+  const ws2: any = {};
+  const merges2: any[] = [];
+  const rows2: any[] = [];
+
+  function set2Cell(r: number, c: number, val: any, style: any, t: string = 's') {
+    const addr = XLSX.utils.encode_cell({ r, c });
+    ws2[addr] = { t, v: val ?? '', s: style || {} };
+  }
+
+  function merge2(r1: number, c1: number, r2: number, c2: number, val: any, style: any, t: string = 's') {
+    merges2.push({ s: { r: r1, c: c1 }, e: { r: r2, c: c2 } });
+    for (let r = r1; r <= r2; r++) {
+      for (let c = c1; c <= c2; c++) {
+        set2Cell(r, c, (r === r1 && c === c1) ? val : '', style, t);
+      }
+    }
+  }
+
+  let r2Idx = 0;
+  merge2(r2Idx, 0, r2Idx, 11, 'DETALLE DE OPERACIONES BANCARIAS Y REPOSITORIOS ASIGNADOS', styleHeaderBanner);
+  rows2.push({ hpt: 28 });
+  r2Idx++;
+
+  merge2(r2Idx, 0, r2Idx, 11, `EMPRESA: ${companyName} | TOTAL PARTIDAS BANCARIAS: ${bankTxs.length}`, styleSubBanner);
+  rows2.push({ hpt: 20 });
+  r2Idx++;
+
+  rows2.push({ hpt: 10 });
+  r2Idx++;
+
+  const h2 = [
+    'REPOSITORIO / CATEGORÍA',
+    'FECHA',
+    'BANCO',
+    'REFERENCIA',
+    'TIPO',
+    'CONCEPTO BANCARIO / DESCRIPCIÓN',
+    'RIF/CÉDULA',
+    'MONTO NOMINAL (Bs.)',
+    'EQUIV. USD ($)',
+    'ESTADO PROBATORIO',
+    'ARCHIVO ADJUNTO / COMPROBANTE',
+    'NOTAS Y EXPLICACIÓN CONTABLE'
+  ];
+  h2.forEach((colTitle, c) => set2Cell(r2Idx, c, colTitle, styleTh));
+  rows2.push({ hpt: 24 });
+  r2Idx++;
+
+  bankTxs.forEach((t, i) => {
+    const modTitle = moduleCatalog.find(m => m.id === (t.moduleTag || 'MOD_HUERFANOS'))?.title || t.moduleTag || 'Carpeta de Huérfanos';
+    const ves = t.amountVes || (t.currency === 'VES' ? t.amountNominal : t.amountNominal * bcvRate);
+    const usd = t.amountUsdEquivalent || (t.currency === 'USD' ? t.amountNominal : t.amountNominal / bcvRate);
+    const hasAtt = (t.attachments && t.attachments.length > 0) || t.matchingStatus === 'MATCHED_EXACT';
+    const attName = t.attachments?.[0]?.name || (t.matchingStatus === 'MATCHED_EXACT' ? 'Auto-Conciliado exacto' : 'Sin archivo');
+
+    const zebraStyle = i % 2 === 0 ? styleTdText : { ...styleTdText, fill: { fgColor: { rgb: 'F8FAFC' } } };
+    const zebraCenter = i % 2 === 0 ? styleTdCenter : { ...styleTdCenter, fill: { fgColor: { rgb: 'F8FAFC' } } };
+    const zebraNum = i % 2 === 0 ? styleTdNum : { ...styleTdNum, fill: { fgColor: { rgb: 'F8FAFC' } } };
+
+    set2Cell(r2Idx, 0, modTitle, zebraStyle);
+    set2Cell(r2Idx, 1, formatToVenezuelanDateHyphen(t.txDate), zebraCenter);
+    set2Cell(r2Idx, 2, t.bankName, zebraStyle);
+    set2Cell(r2Idx, 3, t.referenceNum, zebraCenter);
+    set2Cell(r2Idx, 4, t.txType === 'DEBIT' ? 'Débito / Salida' : 'Crédito / Entrada', zebraCenter);
+    set2Cell(r2Idx, 5, t.rawDescription, zebraStyle);
+    set2Cell(r2Idx, 6, t.counterpartyRif || 'N/P', zebraCenter);
+    set2Cell(r2Idx, 7, formatVenezuelanNumber(t.txType === 'DEBIT' ? -ves : ves), zebraNum);
+    set2Cell(r2Idx, 8, formatVenezuelanNumber(t.txType === 'DEBIT' ? -usd : usd), zebraNum);
+    set2Cell(r2Idx, 9, hasAtt ? '✅ CON SOPORTE' : '⚠️ HUÉRFANO / SIN SOPORTE', zebraCenter);
+    set2Cell(r2Idx, 10, attName, zebraStyle);
+    set2Cell(r2Idx, 11, t.notes || 'Asignado en estación de trabajo NOMINUS', zebraStyle);
+    rows2.push({ hpt: 20 });
+    r2Idx++;
+  });
+
+  ws2['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r2Idx, c: 11 } });
+  ws2['!merges'] = merges2;
+  ws2['!rows'] = rows2;
+  ws2['!cols'] = [
+    { wch: 34 }, // Repositorio
+    { wch: 14 }, // Fecha
+    { wch: 22 }, // Banco
+    { wch: 18 }, // Referencia
+    { wch: 16 }, // Tipo
+    { wch: 48 }, // Concepto
+    { wch: 16 }, // RIF
+    { wch: 22 }, // Monto Bs
+    { wch: 18 }, // Monto USD
+    { wch: 24 }, // Estado
+    { wch: 32 }, // Archivo
+    { wch: 42 }  // Notas
+  ];
+
+  // ----------------------------------------------------
+  // HOJA 3: INVENTARIO DE SOPORTES Y COMPROBANTES DIGITALES
+  // ----------------------------------------------------
+  const ws3: any = {};
+  const merges3: any[] = [];
+  const rows3: any[] = [];
+
+  function set3Cell(r: number, c: number, val: any, style: any, t: string = 's') {
+    const addr = XLSX.utils.encode_cell({ r, c });
+    ws3[addr] = { t, v: val ?? '', s: style || {} };
+  }
+
+  function merge3(r1: number, c1: number, r2: number, c2: number, val: any, style: any, t: string = 's') {
+    merges3.push({ s: { r: r1, c: c1 }, e: { r: r2, c: c2 } });
+    for (let r = r1; r <= r2; r++) {
+      for (let c = c1; c <= c2; c++) {
+        set3Cell(r, c, (r === r1 && c === c1) ? val : '', style, t);
+      }
+    }
+  }
+
+  // Build unique map of all digital supports
+  const supportMap = new Map<string, DigitalSupportAttachment>();
+  digitalSupports.forEach(s => supportMap.set(s.id, s));
+  bankTxs.forEach(t => {
+    t.attachments?.forEach(s => supportMap.set(s.id, s));
+  });
+
+  const supportList = Array.from(supportMap.values());
+
+  let r3Idx = 0;
+  merge3(r3Idx, 0, r3Idx, 10, 'INVENTARIO DE SOPORTES Y COMPROBANTES DIGITALES EN REPOSITORIO', styleHeaderBanner);
+  rows3.push({ hpt: 28 });
+  r3Idx++;
+
+  merge3(r3Idx, 0, r3Idx, 10, `EMPRESA: ${companyName} | TOTAL COMPROBANTES: ${supportList.length}`, styleSubBanner);
+  rows3.push({ hpt: 20 });
+  r3Idx++;
+
+  rows3.push({ hpt: 10 });
+  r3Idx++;
+
+  const h3 = [
+    'ID SOPORTE',
+    'NOMBRE DEL ARCHIVO',
+    'REPOSITORIO / CATEGORÍA',
+    'BANCO EMISOR',
+    'REFERENCIA EXTRAÍDA',
+    'FECHA COMPROBANTE',
+    'MONTO (Bs.)',
+    'EQUIV. USD ($)',
+    'IDENTIFICADOR TERCEIRO',
+    'TIPO ARCHIVO',
+    'EXPLICACIÓN CONTABLE / NOTAS IA'
+  ];
+  h3.forEach((colTitle, c) => set3Cell(r3Idx, c, colTitle, styleTh));
+  rows3.push({ hpt: 24 });
+  r3Idx++;
+
+  supportList.forEach((s, i) => {
+    const meta = s.extractedMetadata;
+    const modTitle = moduleCatalog.find(m => m.id === (s.moduleTag || 'MOD_HUERFANOS'))?.title || s.moduleTag || 'Carpeta de Huérfanos';
+
+    const zebraStyle = i % 2 === 0 ? styleTdText : { ...styleTdText, fill: { fgColor: { rgb: 'F8FAFC' } } };
+    const zebraCenter = i % 2 === 0 ? styleTdCenter : { ...styleTdCenter, fill: { fgColor: { rgb: 'F8FAFC' } } };
+    const zebraNum = i % 2 === 0 ? styleTdNum : { ...styleTdNum, fill: { fgColor: { rgb: 'F8FAFC' } } };
+
+    set3Cell(r3Idx, 0, s.id, zebraCenter);
+    set3Cell(r3Idx, 1, s.name, zebraStyle);
+    set3Cell(r3Idx, 2, modTitle, zebraStyle);
+    set3Cell(r3Idx, 3, meta?.banco_origen || 'N/A', zebraStyle);
+    set3Cell(r3Idx, 4, meta?.referencia_completa || meta?.referencia_ultimos_4 || 'Sin Ref', zebraCenter);
+    set3Cell(r3Idx, 5, meta?.fecha || formatToVenezuelanDateHyphen(s.uploadedAt.split('T')[0]), zebraCenter);
+    set3Cell(r3Idx, 6, formatVenezuelanNumber(meta?.monto || 0), zebraNum);
+    set3Cell(r3Idx, 7, formatVenezuelanNumber(meta?.monto_usd_equivalente || 0), zebraNum);
+    set3Cell(r3Idx, 8, meta?.identificador_tercero || 'N/P', zebraCenter);
+    set3Cell(r3Idx, 9, s.fileType, zebraCenter);
+    set3Cell(r3Idx, 10, meta?.audioContext || s.notes || 'Archivado en repositorio probatorio', zebraStyle);
+    rows3.push({ hpt: 20 });
+    r3Idx++;
+  });
+
+  ws3['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: r3Idx, c: 10 } });
+  ws3['!merges'] = merges3;
+  ws3['!rows'] = rows3;
+  ws3['!cols'] = [
+    { wch: 18 }, // ID
+    { wch: 36 }, // Nombre
+    { wch: 32 }, // Categoria
+    { wch: 22 }, // Banco
+    { wch: 20 }, // Ref
+    { wch: 16 }, // Fecha
+    { wch: 20 }, // Monto Bs
+    { wch: 18 }, // Monto USD
+    { wch: 20 }, // Tercero
+    { wch: 14 }, // Tipo
+    { wch: 48 }  // Notas
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws1, 'Resumen_Por_Repositorios');
+  XLSX.utils.book_append_sheet(wb, ws2, 'Detalle_Operaciones');
+  XLSX.utils.book_append_sheet(wb, ws3, 'Inventario_De_Soportes');
+
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array', cellStyles: true });
+  const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const timestamp = now.toISOString().slice(0, 10).replace(/-/g, '');
+  const cleanRif = companyRif.replace(/[^A-Za-z0-9]/g, '');
+  a.download = `REPOSITORIO_SOPORTES_Y_JUSTIFICACION_${cleanRif}_${timestamp}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * EXPORTACIÓN DEL MANUAL DE PROCEDIMIENTOS Y GUÍA DE USUARIO A WORD (.DOC)
+ * Genera un documento Microsoft Word estructurado en lenguaje sencillo y claro.
+ */
+export function exportManualToWord(company: UserCompanyProfile): void {
+  const companyName = company.companyName || 'EMPRESA CONTRIBUYENTE C.A.';
+  const companyRif = company.companyRif || 'J-00000000-0';
+  const now = new Date();
+  const dateFormatted = formatToVenezuelanDateHyphen(now);
+
+  const htmlContent = `
+  <html xmlns:o='urn:schemas-microsoft-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+  <head>
+    <meta charset='utf-8'>
+    <title>Manual de Procedimientos NOMINUS</title>
+    <style>
+      body { font-family: 'Calibri', 'Arial', sans-serif; font-size: 11pt; color: #1e293b; line-height: 1.6; margin: 30px; }
+      h1 { font-size: 20pt; color: #0f2942; text-align: center; font-weight: bold; margin-bottom: 4px; }
+      .subtitle { font-size: 11pt; color: #475569; text-align: center; font-weight: normal; margin-bottom: 25px; }
+      .header-box { background-color: #0f2942; color: #ffffff; padding: 16px; border-radius: 6px; text-align: center; margin-bottom: 20px; }
+      .header-box h2 { font-size: 14pt; margin: 0; color: #ffffff; border: none; }
+      h2 { font-size: 13pt; color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 4px; margin-top: 22px; }
+      h3 { font-size: 11pt; color: #0f2942; font-weight: bold; margin-top: 14px; }
+      p { margin-bottom: 10px; }
+      ul, ol { margin-left: 20px; margin-bottom: 12px; }
+      li { margin-bottom: 6px; }
+      .step-box { background-color: #f8fafc; border-left: 4px solid #0284c7; padding: 12px; margin: 12px 0; border-radius: 4px; }
+      .tip-box { background-color: #f0fdf4; border-left: 4px solid #16a34a; padding: 12px; margin: 12px 0; border-radius: 4px; }
+      .warning-box { background-color: #fffbeb; border-left: 4px solid #d97706; padding: 12px; margin: 12px 0; border-radius: 4px; }
+      table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+      th { background-color: #1e3a8a; color: #ffffff; padding: 8px; font-size: 10pt; font-weight: bold; text-align: left; }
+      td { border: 1px solid #cbd5e1; padding: 8px; font-size: 9.5pt; }
+      .signature-table td { border: none; padding: 25px 10px; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <div class="header-box">
+      <h2>MANUAL DE PROCEDIMIENTOS Y GUÍA RÁPIDA DE USO</h2>
+      <div class="subtitle" style="color:#e2e8f0; margin-top:5px;">NOMINUS - Conciliación Bancaria Inteligente, Control de Efectivo y Repositorio de Soportes</div>
+    </div>
+
+    <div style="background-color:#f1f5f9; padding:10px; border-radius:4px; font-size:10pt; margin-bottom:20px;">
+      <strong>EMPRESA CONTRIBUYENTE:</strong> ${companyName}<br>
+      <strong>RIF:</strong> ${companyRif}<br>
+      <strong>FECHA DE EMISIÓN:</strong> ${dateFormatted}<br>
+      <strong>NORMATIVA BANCARIA Y FISCAL:</strong> Ven-NIF PYME | Prov. SENIAT 0071 / 2025/000054 | SUDEBAN Res. 010.25
+    </div>
+
+    <h2>CAPÍTULO 1: ¿QUÉ ES NOMINUS Y CÓMO TE AYUDA EN TU TRABAJO?</h2>
+    <p>NOMINUS es un sistema contable e inteligente diseñado para facilitarle la vida a dueños de empresas, administradores y contadores. Su objetivo es muy sencillo:</p>
+    <ul>
+      <li><strong>Cero Errores en Bancos:</strong> Compara lo que dice tu extracto del banco con lo que está anotado en tus libros contables y te muestra si falta algún dinero o si hay cobros dobles.</li>
+      <li><strong>Organización de Comprobantes de Pago:</strong> Guarda y clasifica automáticamente las fotos de los captures de Pago Móvil, transferencias y recibos que envían tus clientes.</li>
+      <li><strong>Cierre Mensual Cuadrado a Bs. 0,00:</strong> Genera carpetas e informes listos para guardar o imprimir por si recibes una revisión de un auditor o del SENIAT.</li>
+    </ul>
+
+    <h2>CAPÍTULO 2: PASO A PASO PARA LLEVAR TUS CUENTAS DÍA A DÍA</h2>
+
+    <div class="step-box">
+      <h3>PASO 1: Configurar tu Empresa y tus Cuentas Bancarias</h3>
+      <p>Lo primero que debes hacer cuando entras a la aplicación es decirle qué empresa vas a trabajar:</p>
+      <ol>
+        <li>Haz clic en el botón verde superior <strong>"Configurar Empresa y Bancos"</strong>.</li>
+        <li>Coloca el Nombre de tu Empresa y tu número de RIF (ejemplo: J-12345678-0).</li>
+        <li>Agrega tus cuentas bancarias seleccionando tu banco (Banesco, Banco de Venezuela, Mercantil, BNC, Bancamiga, Provincial, Zelle, etc.) e ingresando tu número de cuenta.</li>
+        <li>La aplicación actualizará automáticamente la <strong>Tasa Oficial del Banco Central de Venezuela (BCV)</strong> del día.</li>
+      </ol>
+    </div>
+
+    <div class="step-box">
+      <h3>PASO 2: Cargar tu Estado de Cuenta del Banco y tu Libro Contable</h3>
+      <p>NOMINUS te permite cargar tus datos de forma rápida sin tener que escribir todo a mano:</p>
+      <ol>
+        <li>Descarga de la página web de tu banco el estado de cuenta en archivo Excel, CSV o PDF.</li>
+        <li>En NOMINUS, en el <strong>Paso 2 de la Hoja de Ruta</strong>, haz clic en <strong>"Subir Archivo Excel/CSV"</strong> o <strong>"Pegar Texto Copiado"</strong>.</li>
+        <li>Si eliges pegar texto, simplemente copia las columnas del estado de cuenta de tu banco y pégalas en el cuadro blanco. La aplicación reconocerá las fechas, referencias y montos inmediatamente.</li>
+        <li>Repite el proceso para tu Libro Mayor Contable.</li>
+      </ol>
+    </div>
+
+    <div class="step-box">
+      <h3>PASO 3: Cruce Automático e Inteligente con 1 Clic</h3>
+      <p>Una vez cargados los datos, no tienes que revisar línea por línea:</p>
+      <ol>
+        <li>Haz clic en el botón azul o verde <strong>"⚡ Ejecutar Conciliación Automática"</strong>.</li>
+        <li>El sistema emparejará en segundos los movimientos que coincidan en número de referencia, fecha y monto en Bolívares o Dólares.</li>
+        <li>Las partidas que coincidan perfectamente quedarán marcadas en verde como <strong>"Conciliadas"</strong>.</li>
+        <li>Las comisiones bancarias e impuestos como el IGTF se detectarán y registrarán solas.</li>
+      </ol>
+    </div>
+
+    <div class="step-box">
+      <h3>PASO 4: Recepción de Soportes por Telegram y Clasificación de Pagos</h3>
+      <p>Tus clientes te pueden enviar sus comprobantes de pago directamente por Telegram:</p>
+      <ol>
+        <li>En la parte superior, haz clic en <strong>"🤖 Módulo Telegram Bot"</strong>.</li>
+        <li>Pega el Token de tu Bot de Telegram (puedes crearlo gratis con @BotFather).</li>
+        <li>Tus clientes le envían la foto del Pago Móvil o transferencia a tu Bot.</li>
+        <li>La Inteligencia Artificial de NOMINUS lee la foto, extrae el banco, la referencia y el monto, y guarda el soporte en su carpeta correspondiente (Cobro de Clientes, Pago a Proveedores, Impuestos SENIAT, Gastos de Socios, Nómina, etc.).</li>
+        <li>Si deseas mover un comprobante de una carpeta a otra, simplemente usa el selector desplegable en la tarjeta del soporte.</li>
+      </ol>
+    </div>
+
+    <div class="step-box">
+      <h3>PASO 5: Cierre de Mes, Cédula de Cuadre y Exportación a Excel / ERP</h3>
+      <p>Al finalizar el mes, verifica que tu conciliación quede totalmente cuadrada:</p>
+      <ol>
+        <li>El indicador central de la pantalla debe mostrar <strong>"Diferencia: Bs. 0,00"</strong> en color verde.</li>
+        <li>Haz clic en <strong>"📗 Descargar Cuadre Excel (.xlsx)"</strong> para obtener la Portada Oficial con dictamen de auditoría y espacio para firmas.</li>
+        <li>Si usas un sistema contable como Profit Plus, Gálac, Saint, Valery o SGT Contable, ve a <strong>"Exportar a ERP"</strong> para descargar el archivo de importación directa.</li>
+      </ol>
+    </div>
+
+    <h2>CAPÍTULO 3: PREGUNTAS FRECUENTES Y RECOMENDACIONES</h2>
+
+    <div class="tip-box">
+      <strong>💡 ¿Qué hago si el banco cobra un dinero pero no sé qué es?</strong><br>
+      Si aparece un movimiento sin justificación, el sistema lo enviará a la <strong>"Carpeta de Huérfanos"</strong>. Puedes enviar una pregunta automática a Telegram al dueño de la empresa con botones para que responda a qué corresponde el pago.
+    </div>
+
+    <div class="tip-box">
+      <strong>💡 ¿Cómo manejo el dinero en efectivo que entra a caja?</strong><br>
+      Utiliza el módulo de <strong>Arqueos de Caja y Traza de Efectivo</strong>. Allí puedes registrar las remesas físicas, el conteo de billetes y la salida a taquilla bancaria con su número de depósito.
+    </div>
+
+    <div class="warning-box">
+      <strong>⚠️ Recomendación de Seguridad:</strong><br>
+      Todos tus datos viajan de forma cifrada y aislada. Se recomienda descargar periódicamente el respaldo cifrado en la opción <strong>"Bóveda Cifrada"</strong> para conservar copias de seguridad de tus cierres mensuales.
+    </div>
+
+    <h2>APROBACIÓN Y FIRMAS DE CONFORMIDAD</h2>
+    <p>El presente manual ha sido revisado y adoptado como guía técnica de operaciones contables para la empresa:</p>
+
+    <table class="signature-table">
+      <tr>
+        <td style="width: 50%;">
+          __________________________________________________<br>
+          <strong>GERENCIA DE ADMINISTRACIÓN Y FINANZAS</strong><br>
+          Representante Legal / Gerente General<br>
+          Fecha: ${dateFormatted}
+        </td>
+        <td style="width: 50%;">
+          __________________________________________________<br>
+          <strong>CONTADOR PÚBLICO COLEGIADO (C.P.C.)</strong><br>
+          Auditor Interno / Contador General<br>
+          Fecha: ${dateFormatted}
+        </td>
+      </tr>
+    </table>
+  </body>
+  </html>
+  `;
+
+  const blob = new Blob(['\ufeff', htmlContent], {
+    type: 'application/msword;charset=utf-8'
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const cleanRif = companyRif.replace(/[^A-Za-z0-9]/g, '');
+  a.download = `MANUAL_DE_PROCEDIMIENTOS_NOMINUS_${cleanRif}.doc`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Exportador Oficial a Excel de Arqueo de Caja y Gastos Detallados para el SENIAT
+export function exportCashLogToExcel(
+  company: UserCompanyProfile,
+  cashLog: CashLogRecord,
+  bcvRate: number
+) {
+  const companyName = company?.companyName || 'MI EMPRESA, C.A.';
+  const companyRif = company?.companyRif || 'J-00000000-0';
+  const currencySym = cashLog.currency === 'VES' ? 'Bs.' : '$';
+
+  const expensesRowsHtml = (cashLog.expenseItems || []).map((exp: PettyCashExpenseItem, idx: number) => `
+    <tr>
+      <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px;">${idx + 1}</td>
+      <td style="border: 1px solid #cbd5e1; padding: 6px; font-weight: bold;">${exp.concept}</td>
+      <td style="border: 1px solid #cbd5e1; padding: 6px;">${exp.category || 'Gasto General'}</td>
+      <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px; font-family: monospace;">${exp.receiptNum || 'N/A'}</td>
+      <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px; font-family: monospace; font-weight: bold; color: #991b1b;">
+        ${currencySym} ${formatVenezuelanNumber(exp.amount)}
+      </td>
+    </tr>
+  `).join('');
+
+  const billsRowsHtml = (cashLog.billsDetails || []).map((b: CashDenominationCount) => `
+    <tr>
+      <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px; font-weight: bold;">Billete ${currencySym} ${b.denomination}</td>
+      <td style="text-align: center; border: 1px solid #cbd5e1; padding: 6px; font-family: monospace;">${b.count}</td>
+      <td style="text-align: right; border: 1px solid #cbd5e1; padding: 6px; font-family: monospace; font-weight: bold; color: #065f46;">
+        ${currencySym} ${formatVenezuelanNumber(b.total)}
+      </td>
+    </tr>
+  `).join('');
+
+  const htmlContent = `
+  <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+  <head>
+    <meta charset="utf-8">
+    <style>
+      body { font-family: Arial, sans-serif; font-size: 11px; color: #0f172a; }
+      table { border-collapse: collapse; width: 100%; margin-bottom: 15px; }
+      .header-title { font-size: 14px; font-weight: bold; text-align: center; background-color: #0f172a; color: #ffffff; padding: 10px; }
+      .section-header { font-size: 11px; font-weight: bold; background-color: #f1f5f9; color: #0f172a; padding: 8px; border: 1px solid #94a3b8; }
+      .number { text-align: right; font-family: monospace; font-weight: bold; }
+    </style>
+  </head>
+  <body>
+    <table>
+      <tr>
+        <td colspan="5" class="header-title">ACTA OFICIAL DE ARQUEO DE CAJA, GASTOS DETALLADOS Y REMESA BANCARIA</td>
+      </tr>
+      <tr>
+        <td colspan="5" style="text-align: center; font-size: 10px; color: #475569; padding-bottom: 10px;">
+          AUDITORÍA FISCAL DE CAJA CHICA Y RECAUDACIÓN — CUMPLIMIENTO SENIAT Y VEN-NIF
+        </td>
+      </tr>
+      <tr>
+        <td style="font-weight: bold;">EMPRESA / RAZÓN SOCIAL:</td>
+        <td colspan="2">${companyName}</td>
+        <td style="font-weight: bold;">RIF:</td>
+        <td>${companyRif}</td>
+      </tr>
+      <tr>
+        <td style="font-weight: bold;">RESPONSABLE / CAJERO:</td>
+        <td colspan="2">${cashLog.cashier}</td>
+        <td style="font-weight: bold;">TURNO / FECHA:</td>
+        <td>${cashLog.shift} — ${cashLog.date}</td>
+      </tr>
+      <tr>
+        <td style="font-weight: bold;">MONEDA DE CAJA:</td>
+        <td colspan="2">${cashLog.currency} (${currencySym})</td>
+        <td style="font-weight: bold;">TASA BCV HOY:</td>
+        <td>Bs. ${formatVenezuelanNumber(bcvRate)} / USD</td>
+      </tr>
+    </table>
+
+    <table>
+      <tr>
+        <td colspan="2" class="section-header">RESUMEN Y DIAGNÓSTICO DE CUADRE DE CAJA</td>
+      </tr>
+      <tr>
+        <td style="border: 1px solid #cbd5e1; padding: 6px;">(+) Fondo Inicial de Caja:</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px;" class="number">${currencySym} ${formatVenezuelanNumber(cashLog.initialBalance)}</td>
+      </tr>
+      <tr>
+        <td style="border: 1px solid #cbd5e1; padding: 6px;">(+) Ventas / Recaudación en Efectivo:</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; color: #065f46;" class="number">${currencySym} ${formatVenezuelanNumber(cashLog.totalSales)}</td>
+      </tr>
+      <tr>
+        <td style="border: 1px solid #cbd5e1; padding: 6px;">(-) Total Gastos / Compras Detalladas (Caja Chica):</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; color: #991b1b;" class="number">${currencySym} ${formatVenezuelanNumber(cashLog.pettyCashExpenses)}</td>
+      </tr>
+      <tr>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; font-weight: bold; background-color: #f8fafc;">(=) TOTAL ESPERADO EN CAJA:</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; background-color: #f8fafc;" class="number">${currencySym} ${formatVenezuelanNumber(cashLog.expectedTotal)}</td>
+      </tr>
+      <tr>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; font-weight: bold; background-color: #ecfdf5;">TOTAL FÍSICO CONTADO EN BILLETES:</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; background-color: #ecfdf5; color: #065f46;" class="number">${currencySym} ${formatVenezuelanNumber(cashLog.physicalCount)}</td>
+      </tr>
+      <tr>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; font-weight: bold;">DIFERENCIA DE ARQUEO:</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; font-weight: bold;" class="number font-mono">
+          ${cashLog.difference === 0 ? '✓ CUADRADO (0,00)' : `${cashLog.difference > 0 ? '+ SOBRANTE:' : '- FALTANTE:'} ${currencySym} ${formatVenezuelanNumber(Math.abs(cashLog.difference))}`}
+        </td>
+      </tr>
+    </table>
+
+    <table>
+      <thead>
+        <tr>
+          <td colspan="5" class="section-header">RELACIÓN DETALLADA DE GASTOS Y COMPRAS EN EFECTIVO (CAJA CHICA)</td>
+        </tr>
+        <tr style="background-color: #fee2e2; font-weight: bold; border: 1px solid #fca5a5;">
+          <td style="padding: 6px; text-align: center;">N°</td>
+          <td style="padding: 6px;">CONCEPTO DE COMPRA / GASTO</td>
+          <td style="padding: 6px;">CATEGORÍA</td>
+          <td style="padding: 6px; text-align: center;">VALE / FACTURA FISCAL</td>
+          <td style="padding: 6px; text-align: right;">MONTO (${currencySym})</td>
+        </tr>
+      </thead>
+      <tbody>
+        ${expensesRowsHtml || '<tr><td colspan="5" style="text-align: center; padding: 8px;">Sin gastos en efectivo registrados</td></tr>'}
+      </tbody>
+    </table>
+
+    <table>
+      <thead>
+        <tr>
+          <td colspan="3" class="section-header">CONTEO DE BILLETES FÍSICOS POR DENOMINACIÓN</td>
+        </tr>
+        <tr style="background-color: #d1fae5; font-weight: bold; border: 1px solid #6ee7b7;">
+          <td style="padding: 6px; text-align: center;">DENOMINACIÓN DE BILLETE</td>
+          <td style="padding: 6px; text-align: center;">CANTIDAD PIEZAS</td>
+          <td style="padding: 6px; text-align: right;">SUBTOTAL (${currencySym})</td>
+        </tr>
+      </thead>
+      <tbody>
+        ${billsRowsHtml || '<tr><td colspan="3" style="text-align: center; padding: 8px;">Sin conteo registrado</td></tr>'}
+      </tbody>
+    </table>
+
+    <table>
+      <tr>
+        <td colspan="2" class="section-header">DESTINO Y DESPACHO DE LOS FONDOS</td>
+      </tr>
+      <tr>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; font-weight: bold;">DESTINO DE FONDOS:</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px;">${cashLog.bankTarget || 'Caja Fuerte / Bóveda'}</td>
+      </tr>
+      <tr>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; font-weight: bold;">N° PLANILLA DE DEPÓSITO BANCARIO:</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; font-family: monospace;">${cashLog.bankDepositRef || 'RETENIDO EN BÓVEDA'}</td>
+      </tr>
+      <tr>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; font-weight: bold;">ESTADO DEL DESPACHO:</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px;">${cashLog.depositStatus === 'EN_CAJA' ? 'Conservado en Caja Fuerte' : 'Despachado a Banco'}</td>
+      </tr>
+    </table>
+
+    <br><br>
+    <table>
+      <tr>
+        <td style="text-align: center; width: 50%;">
+          _______________________________________<br>
+          <strong>${cashLog.cashier}</strong><br>
+          Cajero / Responsable de Caja<br>
+          Fecha: ${cashLog.date}
+        </td>
+        <td style="text-align: center; width: 50%;">
+          _______________________________________<br>
+          <strong>GERENCIA DE FINANZAS Y AUDITORÍA</strong><br>
+          Aprobado y Verificado<br>
+          Firma y Sello Fiscal de la Empresa
+        </td>
+      </tr>
+    </table>
+  </body>
+  </html>
+  `;
+
+  const blob = new Blob(['\ufeff', htmlContent], {
+    type: 'application/vnd.ms-excel;charset=utf-8'
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const cleanCashier = cashLog.cashier.replace(/[^A-Za-z0-9]/g, '_');
+  a.download = `ARQUEO_DE_CAJA_SENIAT_${cleanCashier}_${cashLog.date}.xls`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

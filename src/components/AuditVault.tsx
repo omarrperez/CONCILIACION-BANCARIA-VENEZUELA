@@ -8,17 +8,28 @@ import {
   Copy,
   Check,
   Search,
-  Download
+  Download,
+  FileSpreadsheet
 } from 'lucide-react';
-import { AuditVaultItem, CurrencyType } from '../types/accounting';
+import { AuditVaultItem, BankTransaction, CurrencyType, DigitalSupportAttachment, UserCompanyProfile } from '../types/accounting';
 import { calculateSha256 } from '../services/cryptoService';
+import { exportToJustificationAndRepositoryExcel } from '../services/exportService';
 
 interface AuditVaultProps {
   currency: CurrencyType;
   bcvRate: number;
+  company?: UserCompanyProfile;
+  transactions?: BankTransaction[];
+  digitalSupports?: DigitalSupportAttachment[];
 }
 
-export const AuditVault: React.FC<AuditVaultProps> = ({ currency, bcvRate }) => {
+export const AuditVault: React.FC<AuditVaultProps> = ({
+  currency,
+  bcvRate,
+  company,
+  transactions = [],
+  digitalSupports = []
+}) => {
   const [vaultItems, setVaultItems] = useState<AuditVaultItem[]>([]);
 
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
@@ -101,12 +112,33 @@ export const AuditVault: React.FC<AuditVaultProps> = ({ currency, bcvRate }) => 
             </div>
           </div>
 
-          <button
-            onClick={() => setIsAdding(!isAdding)}
-            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
-          >
-            {isAdding ? 'Cancelar' : '+ Registrar Documento en Bóveda'}
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            {company && (
+              <button
+                onClick={() => {
+                  exportToJustificationAndRepositoryExcel({
+                    company,
+                    transactions,
+                    currency,
+                    bcvRate,
+                    digitalSupports
+                  });
+                }}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-xs cursor-pointer flex items-center gap-1.5 transition-colors"
+                title="Descargar reporte completo en Excel (.xlsx) de repositorios, transacciones e inventario de soportes"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>📗 Descargar Repositorios Excel (.xlsx)</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => setIsAdding(!isAdding)}
+              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
+            >
+              {isAdding ? 'Cancelar' : '+ Registrar Documento en Bóveda'}
+            </button>
+          </div>
         </div>
       </div>
 

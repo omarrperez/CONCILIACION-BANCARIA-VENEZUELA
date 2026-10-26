@@ -67,8 +67,10 @@ import { NominusDatabasePayload } from './services/encryptedBackupService';
 import { ClearReconciliationModal, ClearReconciliationOption } from './components/ClearReconciliationModal';
 import { OnboardingModal } from './components/OnboardingModal';
 import { InteractiveTourOverlay } from './components/InteractiveTourOverlay';
+import { LandingCoverPage } from './components/LandingCoverPage';
 import { ReconciliationStatusWidget } from './components/ReconciliationStatusWidget';
 import { generateSuggestedAdjustments, applyAdjustmentProposals } from './services/adjustmentEngine';
+import { loginWithGoogle } from './firebase/config';
 import {
   loadLocalTransactions,
   saveLocalTransactions,
@@ -81,6 +83,7 @@ import {
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(false);
   const [localUser, setLocalUser] = useState<any>(() => {
     try {
       const saved = localStorage.getItem('nominus_active_user_session');
@@ -582,6 +585,41 @@ export default function App() {
               });
               setActiveCompanyId(loadedCompanies[0].id);
             }
+          } else {
+            // Provision personal company profile for new Google sign in
+            const emailPrefix = (currentUser.email || 'mi_empresa').split('@')[0].toUpperCase();
+            const initialCompany: CompanyProfile = {
+              id: `comp-${currentUser.uid.slice(0, 8)}`,
+              uid: currentUser.uid,
+              email: currentUser.email || '',
+              companyName: `${emailPrefix}, C.A.`,
+              companyRif: 'J-00000000-0',
+              address: 'Caracas, Venezuela',
+              isSpecialTaxpayer: true,
+              vatRetentionRate: 75,
+              defaultCurrency: 'VES',
+              bcvRate: 56.80,
+              accountingSystemTarget: 'SGT',
+              bankAccounts: [
+                {
+                  id: `bank-banesco-${currentUser.uid.slice(0, 6)}`,
+                  companyId: `comp-${currentUser.uid.slice(0, 8)}`,
+                  bankCode: '0134',
+                  bankName: 'Banesco Banco Universal',
+                  accountNumber: '0134-0000-00-0000000000',
+                  accountType: 'CORRIENTE',
+                  currency: 'VES',
+                  initialBalanceBank: 0,
+                  initialBalanceLedger: 0,
+                  isActive: true,
+                  notes: 'Cuenta Principal Banesco'
+                }
+              ],
+              createdAt: new Date().toISOString()
+            };
+            setDoc(doc(db, 'users', currentUser.uid, 'companies', initialCompany.id), initialCompany, { merge: true }).catch(console.warn);
+            setCompanies([initialCompany]);
+            setActiveCompanyId(initialCompany.id);
           }
 
           // Load user's real transactions from subcollection if any and merge with local state
@@ -1028,6 +1066,21 @@ export default function App() {
     }
   };
 
+  if (!activeUser && !isDemoMode) {
+    return (
+      <LandingCoverPage
+        onLoginWithGoogle={async () => {
+          await loginWithGoogle();
+        }}
+        onLoginWithEmail={(email, name) => {
+          handleLoginAsLocalUser(email, name);
+        }}
+        onStartDemo={() => setIsDemoMode(true)}
+        bcvRate={company.bcvRate}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-800 font-sans selection:bg-emerald-100 selection:text-emerald-900 flex flex-col">
       
@@ -1219,7 +1272,7 @@ export default function App() {
                 transactions={transactions}
                 currency={currency}
                 proofOfCash={proofOfCash}
-                onNavigateToStep={(step) => {
+                onNavigateToStep={(step: number) => {
                   setRoadmapActiveStep(step);
                   const el = document.getElementById('reconciliation-roadmap-wizard');
                   if (el) el.scrollIntoView({ behavior: 'smooth' });
@@ -1591,6 +1644,7 @@ export default function App() {
               transactions={transactions}
               currency={currency}
               bcvRate={company.bcvRate}
+              digitalSupports={digitalSupports}
               selectedTxForJustification={txForJustification}
               onAssignModule={handleAssignModule}
               onUpdateTransactions={setTransactions}
@@ -1619,6 +1673,9 @@ export default function App() {
             <AuditVault
               currency={currency}
               bcvRate={company.bcvRate}
+              company={company}
+              transactions={transactions}
+              digitalSupports={digitalSupports}
             />
           )}
 
@@ -1996,6 +2053,7 @@ export default function App() {
         onStartUpload={(source) => handleOpenUploadFromRoadmap(source, 'PASTE')}
         onNavigateToWorkspace={() => setActiveModule('RECONCILIATION')}
         onNavigateToResults={() => setActiveModule('RECONCILIATION_RESULTS')}
+        company={company}
       />
 
       <InteractiveTourOverlay

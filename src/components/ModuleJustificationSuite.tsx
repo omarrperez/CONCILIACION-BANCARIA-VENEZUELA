@@ -32,7 +32,8 @@ import {
   X,
   FilePlus,
   RefreshCw,
-  Hash
+  Hash,
+  FileSpreadsheet
 } from 'lucide-react';
 import {
   BankTransaction,
@@ -43,6 +44,9 @@ import {
 import { RECONCILIATION_MODULES } from '../data/venNifAccounts';
 import { categorizeTransactionRuleBased } from '../services/aiAccountant';
 import { processBankStatementForJustification } from '../services/justificationPipeline';
+import {
+  exportToJustificationAndRepositoryExcel
+} from '../services/exportService';
 import { TelegramSyncControl } from './TelegramSyncControl';
 
 interface ModuleJustificationSuiteProps {
@@ -50,6 +54,7 @@ interface ModuleJustificationSuiteProps {
   transactions: BankTransaction[];
   currency: CurrencyType;
   bcvRate: number;
+  digitalSupports?: DigitalSupportAttachment[];
   selectedTxForJustification?: BankTransaction | null;
   onAssignModule: (txId: string, moduleTag: string, notes: string) => void;
   onUpdateTransactions?: (updated: BankTransaction[]) => void;
@@ -74,6 +79,7 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
   transactions,
   currency,
   bcvRate,
+  digitalSupports = [],
   selectedTxForJustification,
   onAssignModule,
   onUpdateTransactions,
@@ -368,6 +374,22 @@ export const ModuleJustificationSuite: React.FC<ModuleJustificationSuiteProps> =
               setTimeout(() => setSuccessMsg(null), 4000);
             }}
           />
+          <button
+            onClick={() => {
+              exportToJustificationAndRepositoryExcel({
+                company,
+                transactions,
+                currency,
+                bcvRate,
+                digitalSupports
+              });
+            }}
+            className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs shadow-md flex items-center gap-2 cursor-pointer transition-all shrink-0 hover:scale-[1.02] active:scale-[0.98]"
+            title="Descargar reporte completo en Excel (.xlsx) de categorías clasificadas, operaciones por repositorio e inventario de soportes"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-slate-950" />
+            <span>📗 Descargar Excel Repositorios</span>
+          </button>
           <button
             onClick={handleAutoClassifyAll}
             className="px-4 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black text-xs shadow-md flex items-center gap-2 cursor-pointer transition-all shrink-0 hover:scale-[1.02] active:scale-[0.98]"
