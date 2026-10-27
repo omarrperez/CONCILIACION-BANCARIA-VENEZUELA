@@ -378,11 +378,19 @@ export const DashboardControlPanel: React.FC<DashboardControlPanelProps> = ({
 
       {/* Menú de Panel de Control en Cuadros Pequeños con Colores Pasteles */}
       <div>
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
           <h2 className="text-xs font-bold tracking-wider text-slate-500 uppercase flex items-center gap-1.5">
-            <span>Panel de Módulos Operativos</span>
-            <span className="text-[10px] lowercase text-slate-400 font-normal">(haz clic en cualquier cuadro para entrar)</span>
+            <span>Panel de Módulos Operativos (13 Módulos)</span>
+            <span className="text-[10px] lowercase text-slate-400 font-normal hidden sm:inline">(haz clic en cualquier cuadro para entrar)</span>
           </h2>
+          <button
+            onClick={() => onSelectModule('ERP_EXPORT')}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-pointer shadow-2xs"
+            title="Abrir Manual de Procedimientos Operativos y Conexión Telegram"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-emerald-600" />
+            <span>📖 Manual de Procedimientos & Telegram</span>
+          </button>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">

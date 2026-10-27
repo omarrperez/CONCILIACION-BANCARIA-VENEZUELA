@@ -1591,101 +1591,314 @@ export function exportManualToWord(company: UserCompanyProfile): void {
   </head>
   <body>
     <div class="header-box">
-      <h2>MANUAL DE PROCEDIMIENTOS Y GUÍA RÁPIDA DE USO</h2>
-      <div class="subtitle" style="color:#e2e8f0; margin-top:5px;">NOMINUS - Conciliación Bancaria Inteligente, Control de Efectivo y Repositorio de Soportes</div>
+      <h2>MANUAL DE PROCEDIMIENTOS Y POLÍTICAS CONTABLES OFICIALES</h2>
+      <div class="subtitle" style="color:#e2e8f0; margin-top:5px;">SISTEMA CONTABLE Y CONCILIACIÓN BANCARIA INTELIGENTE VEN-NIF Y SGT</div>
     </div>
 
-    <div style="background-color:#f1f5f9; padding:10px; border-radius:4px; font-size:10pt; margin-bottom:20px;">
+    <div style="background-color:#f1f5f9; padding:12px; border-radius:6px; font-size:10pt; margin-bottom:20px; border-left: 4px solid #0f2942;">
       <strong>EMPRESA CONTRIBUYENTE:</strong> ${companyName}<br>
-      <strong>RIF:</strong> ${companyRif}<br>
-      <strong>FECHA DE EMISIÓN:</strong> ${dateFormatted}<br>
-      <strong>NORMATIVA BANCARIA Y FISCAL:</strong> Ven-NIF PYME | Prov. SENIAT 0071 / 2025/000054 | SUDEBAN Res. 010.25
+      <strong>REGISTRO DE INFORMACIÓN FISCAL (RIF):</strong> ${companyRif}<br>
+      <strong>FECHA DE EMISIÓN Y ADOPCIÓN:</strong> ${dateFormatted}<br>
+      <strong>MARCO TÉCNICO Y REGULATORIO:</strong> Ven-NIF PYME | Providencias SENIAT 0071 y 2025/000054 | Normativa SUDEBAN Res. 010.25 | Ecuación de Partida Doble
     </div>
 
-    <h2>CAPÍTULO 1: ¿QUÉ ES NOMINUS Y CÓMO TE AYUDA EN TU TRABAJO?</h2>
-    <p>NOMINUS es un sistema contable e inteligente diseñado para facilitarle la vida a dueños de empresas, administradores y contadores. Su objetivo es muy sencillo:</p>
+    <h2>CAPÍTULO 1: OBJETIVO, POLÍTICA DE CONTROL INTERNO Y ALCANCE</h2>
+    <p>El presente manual tiene por objeto regular y estandarizar el proceso integral de conciliación bancaria, registro de movimientos y generación automática de asientos contables para la empresa <strong>${companyName}</strong>. Sus directrices son de cumplimiento obligatorio para todo el personal del departamento de administración, contabilidad y tesorería.</p>
     <ul>
-      <li><strong>Cero Errores en Bancos:</strong> Compara lo que dice tu extracto del banco con lo que está anotado en tus libros contables y te muestra si falta algún dinero o si hay cobros dobles.</li>
-      <li><strong>Organización de Comprobantes de Pago:</strong> Guarda y clasifica automáticamente las fotos de los captures de Pago Móvil, transferencias y recibos que envían tus clientes.</li>
-      <li><strong>Cierre Mensual Cuadrado a Bs. 0,00:</strong> Genera carpetas e informes listos para guardar o imprimir por si recibes una revisión de un auditor o del SENIAT.</li>
+      <li><strong>Principio de Partida Doble Estricta:</strong> Ningún asiento o cierre mensual puede generarse con descuadre. Todo movimiento contable debe satisfacer la ecuación: <code>Total Debe = Total Haber (Diferencia = Bs. 0,00)</code>.</li>
+      <li><strong>Trazabilidad de Fondos y Soportes (SUDEBAN / SENIAT):</strong> Cada débito o crédito bancario debe estar justificado por su soporte documental (factura fiscal legal, comprobante de retención, recibo de caja chica o capture de transferencia/Pago Móvil).</li>
+      <li><strong>Separación por Banco Emisor:</strong> Cada institución bancaria venezolana (Banco de Venezuela, Banesco, Mercantil, BNC, Bancamiga, Plaza) se rige por su código de cuenta específico asignado en el Plan de Cuentas Maestro.</li>
     </ul>
 
-    <h2>CAPÍTULO 2: PASO A PASO PARA LLEVAR TUS CUENTAS DÍA A DÍA</h2>
+    <h2>CAPÍTULO 2: ARQUITECTURA DEL SISTEMA Y FLUJO OPERATIVO EN 3 PASOS</h2>
+    <p>La aplicación ha sido diseñada bajo una diagramación fresca y descansada, permitiendo al usuario completar la conciliación y los asientos contables en 3 acciones directas:</p>
+    
+    <div class="step-box">
+      <h3>ACCIÓN 1: Cargar Estado de Cuenta Bancario y Libro Mayor</h3>
+      <p>El usuario accede al botón <strong>"1. Cargar Estado de Cuenta"</strong> y suministra la información mensual:</p>
+      <ul>
+        <li><strong>Formatos Aceptados:</strong> Archivos Excel (.xlsx, .xls), archivos separados por comas (.csv) o archivos de texto/PDF descargados directamente del portal bancario.</li>
+        <li><strong>Lector Rápido por Portapapeles:</strong> Es posible copiar las filas directamente del banco y pegarlas en el recuadro blanco para su estructuración automática.</li>
+        <li><strong>Validación de Saldos Iniciales:</strong> Se debe verificar que el saldo inicial del banco y el saldo inicial del mayor coincidan con el corte del mes inmediatamente anterior.</li>
+      </ul>
+    </div>
 
     <div class="step-box">
-      <h3>PASO 1: Configurar tu Empresa y tus Cuentas Bancarias</h3>
-      <p>Lo primero que debes hacer cuando entras a la aplicación es decirle qué empresa vas a trabajar:</p>
+      <h3>ACCIÓN 2: Cruzar y Auto-Cuadrar con Reglas Venezolanas</h3>
+      <p>Al presionar <strong>"2. Cruzar y Auto-Cuadrar"</strong>, el motor de conciliación ejecuta de forma instantánea:</p>
+      <ul>
+        <li><strong>Emparejamiento de Referencias:</strong> Cruce algorítmico por número de referencia bancaria (últimos 4 u 8 dígitos) y monto idéntico en Bolívares o Dólares.</li>
+        <li><strong>Reconocimiento de Gastos Fijos:</strong> Comisiones bancarias, gastos de mantenimiento de cuenta, emisión de estados de cuenta y cobros de Pago Móvil se imputan automáticamente a la cuenta de egreso <code>6.1.2.5.02</code>.</li>
+        <li><strong>Detección de Partidas en Tránsito:</strong> Identificación precisa de depósitos en tránsito y cheques no cobrados para la ecuación matemática de prueba de efectivo.</li>
+      </ul>
+    </div>
+
+    <div class="step-box">
+      <h3>ACCIÓN 3: Generación de Asientos para SGT Contable y ERP</h3>
+      <p>Al presionar <strong>"3. Asientos SGT y Excel"</strong>, el sistema compila y descarga el libro de asientos contables conforme a las normas técnicas venezolanas.</p>
+    </div>
+
+    <h2>CAPÍTULO 3: ESTRUCTURA REGLAMENTARIA DE ASIENTOS SGT CONTABLE (3 HOJAS)</h2>
+    <p>Para la carga automática en <strong>SGT Contable</strong> y sistemas ERP (Profit Plus, Gálac, Saint, Valery), el archivo Excel generado (<code>asientos_generados.xlsx</code>) contiene estrictamente 5 columnas y se desglosa en 3 hojas de cálculo:</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Columna A</th>
+          <th>Columna B</th>
+          <th>Columna C</th>
+          <th>Columna D</th>
+          <th>Columna E</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>CUENTA CONTABLE</td>
+          <td>DESCRIPCION</td>
+          <td>TIPO (NC / ND)</td>
+          <td>REFERENCIA</td>
+          <td>MONTO (Bs.)</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="step-box">
+      <h3>Hoja 1: Hoja de Entrada Contable Completa</h3>
+      <p>Contiene la totalidad de los registros extraídos del estado de cuenta bancario, clasificados con su respectiva cuenta contable y manteniendo el signo original de los valores (positivos y negativos en la misma columna de monto).</p>
+    </div>
+
+    <div class="step-box">
+      <h3>Hoja 2: Notas de Crédito (NC - Montos Positivos / Ingresos)</h3>
       <ol>
-        <li>Haz clic en el botón verde superior <strong>"Configurar Empresa y Bancos"</strong>.</li>
-        <li>Coloca el Nombre de tu Empresa y tu número de RIF (ejemplo: J-12345678-0).</li>
-        <li>Agrega tus cuentas bancarias seleccionando tu banco (Banesco, Banco de Venezuela, Mercantil, BNC, Bancamiga, Provincial, Zelle, etc.) e ingresando tu número de cuenta.</li>
-        <li>La aplicación actualizará automáticamente la <strong>Tasa Oficial del Banco Central de Venezuela (BCV)</strong> del día.</li>
+        <li>Filtra exclusivamente todas las transacciones con monto positivo extraídas del extracto.</li>
+        <li>Asigna el código de cuenta contable del Banco correspondiente (ejemplo: <code>1.1.1.2.10</code>, <code>1.1.1.2.20</code>, <code>1.1.1.2.30</code> o <code>1.1.1.2.60</code>) y coloca <code>NC</code> en la columna TIPO.</li>
+        <li><strong>Fila de Contrapartida Obligatoria al Final:</strong> Al término de la lista, se adiciona una fila de contrapartida con:
+          <ul>
+            <li><strong>Cuenta Contable:</strong> <code>1.1.2.1.10</code> (Cuentas por cobrar).</li>
+            <li><strong>Descripción:</strong> "Cuentas por cobrar (contrapartida NC)".</li>
+            <li><strong>Tipo:</strong> NC.</li>
+            <li><strong>Referencia:</strong> "RES-[Fecha de Cierre]".</li>
+            <li><strong>Monto:</strong> La sumatoria total de los ingresos pero en signo <strong>NEGATIVO (-)</strong>.</li>
+          </ul>
+        </li>
+        <li><strong>Validación Matemática:</strong> La sumatoria de la columna Monto debe resultar <strong>exactamente 0,00</strong>.</li>
       </ol>
     </div>
 
     <div class="step-box">
-      <h3>PASO 2: Cargar tu Estado de Cuenta del Banco y tu Libro Contable</h3>
-      <p>NOMINUS te permite cargar tus datos de forma rápida sin tener que escribir todo a mano:</p>
+      <h3>Hoja 3: Notas de Débito (ND - Montos Negativos / Egresos)</h3>
       <ol>
-        <li>Descarga de la página web de tu banco el estado de cuenta en archivo Excel, CSV o PDF.</li>
-        <li>En NOMINUS, en el <strong>Paso 2 de la Hoja de Ruta</strong>, haz clic en <strong>"Subir Archivo Excel/CSV"</strong> o <strong>"Pegar Texto Copiado"</strong>.</li>
-        <li>Si eliges pegar texto, simplemente copia las columnas del estado de cuenta de tu banco y pégalas en el cuadro blanco. La aplicación reconocerá las fechas, referencias y montos inmediatamente.</li>
-        <li>Repite el proceso para tu Libro Mayor Contable.</li>
+        <li>Filtra exclusivamente todas las filas de débito o salida de fondos.</li>
+        <li>Se asientan en primer lugar las partidas con signo positivo (+) asignadas a sus cuentas de gasto o pasivo correspondientes (Proveedores <code>2.1.1.1.10</code>, Comisiones <code>6.1.2.5.02</code>, Impuestos, etc.) y Tipo <code>ND</code>.</li>
+        <li>A continuación, se duplican exactamente las mismas partidas pero con signo <strong>NEGATIVO (-)</strong> y asignadas a la cuenta contable del Banco (ejemplo: <code>1.1.1.2.60</code>, <code>1.1.1.2.20</code>, etc.).</li>
+        <li><strong>Validación Matemática:</strong> El asiento contable cumple la doble partida y su sumatoria total cierra exactamente en <strong>0,00</strong>.</li>
       </ol>
     </div>
-
-    <div class="step-box">
-      <h3>PASO 3: Cruce Automático e Inteligente con 1 Clic</h3>
-      <p>Una vez cargados los datos, no tienes que revisar línea por línea:</p>
-      <ol>
-        <li>Haz clic en el botón azul o verde <strong>"⚡ Ejecutar Conciliación Automática"</strong>.</li>
-        <li>El sistema emparejará en segundos los movimientos que coincidan en número de referencia, fecha y monto en Bolívares o Dólares.</li>
-        <li>Las partidas que coincidan perfectamente quedarán marcadas en verde como <strong>"Conciliadas"</strong>.</li>
-        <li>Las comisiones bancarias e impuestos como el IGTF se detectarán y registrarán solas.</li>
-      </ol>
-    </div>
-
-    <div class="step-box">
-      <h3>PASO 4: Recepción de Soportes por Telegram y Clasificación de Pagos</h3>
-      <p>Tus clientes te pueden enviar sus comprobantes de pago directamente por Telegram:</p>
-      <ol>
-        <li>En la parte superior, haz clic en <strong>"🤖 Módulo Telegram Bot"</strong>.</li>
-        <li>Pega el Token de tu Bot de Telegram (puedes crearlo gratis con @BotFather).</li>
-        <li>Tus clientes le envían la foto del Pago Móvil o transferencia a tu Bot.</li>
-        <li>La Inteligencia Artificial de NOMINUS lee la foto, extrae el banco, la referencia y el monto, y guarda el soporte en su carpeta correspondiente (Cobro de Clientes, Pago a Proveedores, Impuestos SENIAT, Gastos de Socios, Nómina, etc.).</li>
-        <li>Si deseas mover un comprobante de una carpeta a otra, simplemente usa el selector desplegable en la tarjeta del soporte.</li>
-      </ol>
-    </div>
-
-    <div class="step-box">
-      <h3>PASO 5: Cierre de Mes, Cédula de Cuadre y Exportación a Excel / ERP</h3>
-      <p>Al finalizar el mes, verifica que tu conciliación quede totalmente cuadrada:</p>
-      <ol>
-        <li>El indicador central de la pantalla debe mostrar <strong>"Diferencia: Bs. 0,00"</strong> en color verde.</li>
-        <li>Haz clic en <strong>"📗 Descargar Cuadre Excel (.xlsx)"</strong> para obtener la Portada Oficial con dictamen de auditoría y espacio para firmas.</li>
-        <li>Si usas un sistema contable como Profit Plus, Gálac, Saint, Valery o SGT Contable, ve a <strong>"Exportar a ERP"</strong> para descargar el archivo de importación directa.</li>
-      </ol>
-    </div>
-
-    <h2>CAPÍTULO 3: PREGUNTAS FRECUENTES Y RECOMENDACIONES</h2>
 
     <div class="tip-box">
-      <strong>💡 ¿Qué hago si el banco cobra un dinero pero no sé qué es?</strong><br>
-      Si aparece un movimiento sin justificación, el sistema lo enviará a la <strong>"Carpeta de Huérfanos"</strong>. Puedes enviar una pregunta automática a Telegram al dueño de la empresa con botones para que responda a qué corresponde el pago.
+      <strong>Regla de Formato Numérico Venezolano:</strong> Todos los importes monetarios deben formatearse con dos (2) decimales, utilizando el punto (.) como separador de miles y la coma (,) como separador decimal: <code>-1.234,10</code> y <code>1.234,10</code>.
     </div>
 
-    <div class="tip-box">
-      <strong>💡 ¿Cómo manejo el dinero en efectivo que entra a caja?</strong><br>
-      Utiliza el módulo de <strong>Arqueos de Caja y Traza de Efectivo</strong>. Allí puedes registrar las remesas físicas, el conteo de billetes y la salida a taquilla bancaria con su número de depósito.
+    <h2>CAPÍTULO 4: MANUAL OPERATIVO DEL PANEL DE MÓDULOS SGT (LOS 13 MÓDULOS)</h2>
+    <p>A continuación se describe de manera clara y sencilla el propósito, uso paso a paso y fundamento legal de cada uno de los 13 módulos del Panel Operativo SGT:</p>
+
+    <div class="step-box">
+      <h3>1. Movimientos Huérfanos por Aclarar (Modo Rápido 1 Clic - PENDIENTES_ACLARAR)</h3>
+      <p><strong>Objetivo:</strong> Clasificar con 1 solo clic los débitos y créditos bancarios que no tienen contrapartida identificada, evitando que el SENIAT los presuma como ingresos gravables omitidos (COT, Art. 129).</p>
+      <p><strong>Cómo se usa:</strong> El usuario abre la bandeja de huérfanos, observa el monto y concepto del banco, y presiona el botón directo correspondiente: [Proveedor], [Socio], [Gasto Menor], [Venta] o [Consultar por Telegram al Socio]. El movimiento sale de la lista y se incorpora al libro diario de forma automática.</p>
     </div>
 
-    <div class="warning-box">
-      <strong>⚠️ Recomendación de Seguridad:</strong><br>
-      Todos tus datos viajan de forma cifrada y aislada. Se recomienda descargar periódicamente el respaldo cifrado en la opción <strong>"Bóveda Cifrada"</strong> para conservar copias de seguridad de tus cierres mensuales.
+    <div class="step-box">
+      <h3>2. Bóveda de Conciliaciones Mensuales (MONTHLY_RECONCILIATION_VAULT)</h3>
+      <p><strong>Objetivo:</strong> Archivo histórico de cierres contables mensuales bajo Ven-NIF, cumpliendo con la obligación del Código de Comercio venezolano (Art. 44) de conservar libros y respaldos por 10 años.</p>
+      <p><strong>Cómo se usa:</strong> Permite consultar meses pasados (ejemplo: Enero 2026, Febrero 2026, Septiembre 2025), reimprimir la Cédula oficial y restaurar un punto de control si se requiere auditar transacciones pasadas.</p>
     </div>
 
-    <h2>APROBACIÓN Y FIRMAS DE CONFORMIDAD</h2>
-    <p>El presente manual ha sido revisado y adoptado como guía técnica de operaciones contables para la empresa:</p>
+    <div class="step-box">
+      <h3>3. Mesa de Trabajo de Conciliación Bancaria (5 Etapas / Split-Screen - RECONCILIATION)</h3>
+      <p><strong>Objetivo:</strong> Comparar visualmente en pantalla dividida el Extracto Bancario (izquierda) y el Libro Mayor (derecha) conforme a la Ven-NIF PYME Sección 7.</p>
+      <p><strong>Cómo se usa:</strong> Permite buscar partidas por monto o referencia, emparejar transacciones manualmente, conciliar diferencias de céntimos y auditar las 5 etapas del cierre.</p>
+    </div>
+
+    <div class="step-box">
+      <h3>4. Cédula Oficial de Conciliación Ven-NIF (RECONCILIATION_RESULTS)</h3>
+      <p><strong>Objetivo:</strong> Dictamen formal y carátula de conciliación bancaria en 4 columnas exigida por comisarios mercantiles, bancos y auditores de la FCCPV.</p>
+      <p><strong>Cómo se usa:</strong> Muestra la fórmula matemática: Saldo Banco + Depósitos en Tránsito - Cheques en Tránsito = Saldo Libros (Diferencia = Bs. 0,00) y descarga la portada ejecutiva en Excel (.xlsx) con firmas de auditoría.</p>
+    </div>
+
+    <div class="step-box">
+      <h3>5. Asistente de Asientos Contables y Ajustes por IA (AI_ASSISTANT)</h3>
+      <p><strong>Objetivo:</strong> Normalizar conceptos bancarios abreviados y generar los asientos de ajuste en partida doble para cargos bancarios no registrados.</p>
+      <p><strong>Cómo se usa:</strong> Pega el texto del banco o libro mayor; el motor de IA identifica la contraparte, propone el asiento (Debe/Haber) y con un clic lo incorpora al libro diario.</p>
+    </div>
+
+    <div class="step-box">
+      <h3>6. Arqueos de Caja y Traza de Efectivo en Bs. y Divisas (CASH_TRAIL)</h3>
+      <p><strong>Objetivo:</strong> Control del dinero físico (Bolívares y Dólares), fondo de caja chica, conteo de billetes por denominación y soporte para depósitos bancarios.</p>
+      <p><strong>Cómo se usa:</strong> El cajero apertura turno con el fondo fijo, anota ventas en efectivo y gastos menores con vale, cuenta las piezas de billetes ($100, $50, $20, etc.) y genera la planilla de depósito bancario con cuadre a 0,00.</p>
+    </div>
+
+    <div class="step-box">
+      <h3>7. Módulo Fiscal SENIAT e Impuestos (SENIAT_TAX)</h3>
+      <p><strong>Objetivo:</strong> Cumplimiento de retenciones de IVA (75%/100% Prov. SNAT/2025/000054), IGTF, retenciones de ISLR y Ley de Pensiones.</p>
+      <p><strong>Cómo se usa:</strong> Agrupa todos los pagos al SENIAT, valida las retenciones practicadas y genera el archivo plano oficial .TXT para la carga masiva en el portal del SENIAT.</p>
+    </div>
+
+    <div class="step-box">
+      <h3>8. Escudo SUDEBAN 010.25 y Prevención AML (SUDEBAN_AML)</h3>
+      <p><strong>Objetivo:</strong> Blindaje ante bloqueos de cuentas y requerimientos de la UNIF / SUDEBAN conforme a la Resolución 010.25 sobre Administración de Riesgos LC/FT/FPADM.</p>
+      <p><strong>Cómo se usa:</strong> Monitorea transacciones que superen umbrales de alerta, clasifica el perfil de riesgo de clientes/proveedores y emite el Dossier de Cumplimiento Bancario.</p>
+    </div>
+
+    <div class="step-box">
+      <h3>9. Justificación de Fondos y 16 Repositorios Digitales (JUSTIFICATION_MODULES)</h3>
+      <p><strong>Objetivo:</strong> Organizar los movimientos bancarios en 16 carpetas temáticas con fotos y documentos probatorios de deducibilidad (LISLR Arts. 86 y 87).</p>
+      <p><strong>Cómo se usa:</strong> Al terminar el cuadre, presiona "Transferir a Repositorios", revisa cada carpeta temática y descarga la matriz de justificación en Excel de 3 hojas para inspecciones fiscales.</p>
+    </div>
+
+    <div class="step-box">
+      <h3>10. Contratos Legales y Bóveda de Socios (LEGAL_CONTRACTS)</h3>
+      <p><strong>Objetivo:</strong> Instrumentar contractualmente las transferencias entre accionistas y la empresa mediante contratos de mutuo conforme al Código de Comercio venezolano.</p>
+      <p><strong>Cómo se usa:</strong> Selecciona el tipo de préstamo, ingresa el porcentaje y plazo del socio, y el sistema redacta el contrato legal listo para firmar y notarizar, evitando presunciones de dividendos encubiertos.</p>
+    </div>
+
+    <div class="step-box">
+      <h3>11. Expediente y Bóveda Criptográfica SHA-256 (AUDIT_VAULT)</h3>
+      <p><strong>Objetivo:</strong> Sellar con huella digital matemática inmutable cada cierre mensual bajo la Ley de Mensajes de Datos y Firmas Electrónicas.</p>
+      <p><strong>Cómo se usa:</strong> Presiona "Sellar Cierre Mensual con SHA-256"; el sistema calcula el hash irreversible de 64 caracteres, garantizando que los libros no puedan ser alterados sin detección.</p>
+    </div>
+
+    <div class="step-box">
+      <h3>12. Centro de Exportación ERP y Sistemas Contables (ERP_EXPORT)</h3>
+      <p><strong>Objetivo:</strong> Exportar los asientos conciliados para carga automática en software venezolano: SGT Contable, Profit Plus, Gálac, Saint, Valery y Excel.</p>
+      <p><strong>Cómo se usa:</strong> Selecciona la tarjeta de tu sistema contable, descarga el archivo en su formato nativo (.xlsx, .txt, .csv) e impórtalo en tu libro diario principal.</p>
+    </div>
+
+    <div class="step-box">
+      <h3>13. Reglas Contables de Bancos Venezolanos (BANK_RULES)</h3>
+      <p><strong>Objetivo:</strong> Diccionario normativo con los planes de cuentas de Banco Mercantil, Bancamiga, Banco de Venezuela, Banco Plaza, BNC y Banesco.</p>
+      <p><strong>Cómo se usa:</strong> Consulta la asignación de cuentas contables específicas por concepto bancario (SGLBTR, BioPago, CCE, Masterdebit, P2C, Domiciliaciones).</p>
+    </div>
+
+    <h2>CAPÍTULO 5: MANUAL DE PROCEDIMIENTOS: CONEXIÓN TELEGRAM Y DISTRIBUCIÓN DE SOPORTES</h2>
+    <p>Este procedimiento regula la recepción automatizada de comprobantes de pago por Telegram y su incorporación al expediente contable:</p>
+
+    <div class="step-box">
+      <h3>Fase 1: Configuración Técnica del Bot de Telegram</h3>
+      <ol>
+        <li>Abrir la aplicación Telegram y buscar la cuenta oficial <strong>@BotFather</strong>.</li>
+        <li>Enviar el comando <code>/newbot</code>, asignar nombre al bot (ejemplo: <em>Cobranzas Empresa C.A.</em>) y un usuario que termine en "bot" (ejemplo: <code>empresa_pagos_bot</code>).</li>
+        <li>Copiar el <strong>Token HTTP API</strong> entregado por @BotFather (ej. <code>7123456789:AAH...</code>).</li>
+        <li>En NOMINUS, hacer clic en el botón de Telegram en la barra superior, pegar el Token en la pestaña <em>Configuración</em> y presionar <strong>"Probar Conexión"</strong>.</li>
+        <li>Configurar el <strong>Chat ID</strong> del grupo de cobranza de la empresa para sincronización automática.</li>
+      </ol>
+    </div>
+
+    <div class="step-box">
+      <h3>Fase 2: Procedimiento de Envío y Recepción de Soportes</h3>
+      <ol>
+        <li>El cliente, vendedor o cajero toma una fotografía o captura de pantalla del Pago Móvil, transferencia bancaria, recibo de punto de venta o factura y la envía por chat al Bot de Telegram.</li>
+        <li>NOMINUS se conecta en tiempo real al bot, descarga el archivo multimedia en alta calidad y registra la marca de tiempo (timestamp) y el remitente.</li>
+        <li>El motor de <strong>Inteligencia Artificial (OCR Contable)</strong> procesa la imagen y extrae:
+          <ul>
+            <li>Banco Emisor y Receptor (Banesco, BDV, Mercantil, BNC, Bancamiga, Plaza, etc.).</li>
+            <li>Número de Referencia de la operación.</li>
+            <li>Monto en Bolívares y su equivalente en Dólares según la Tasa Oficial BCV.</li>
+            <li>Fecha y hora de la transacción.</li>
+            <li>Identificación del pagador o beneficiario (Cédula / RIF y Nombre).</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+
+    <div class="step-box">
+      <h3>Fase 3: Distribución Automática en la Aplicación</h3>
+      <ol>
+        <li><strong>Emparejamiento Bancario:</strong> El sistema compara la referencia y el monto extraído con las partidas del extracto bancario cargado. Al hallar coincidencia exacta, enlaza el soporte a la transacción y le asigna el estado <code>✅ CON SOPORTE</code>.</li>
+        <li><strong>Distribución en las 16 Carpetas Temáticas:</strong> El comprobante se almacena automáticamente en su repositorio correspondiente: Ventas (<code>MOD_VENTAS</code>), Puntos de Venta (<code>MOD_POS</code>), Proveedores (<code>MOD_PROVEEDORES</code>), Pagos SENIAT (<code>MOD_SENIAT_PAGO</code>), Cuentas Socios (<code>MOD_SOCIOS_IN</code>), Nómina (<code>MOD_NOMINA</code>), etc.</li>
+        <li><strong>Gestión de Huérfanos:</strong> Si el capture no coincide con ninguna partida bancaria en el extracto, pasa a la <strong>Carpeta de Huérfanos (MOD_HUERFANOS)</strong>.</li>
+        <li><strong>Consulta Interactiva a Telegram:</strong> Desde la app se puede enviar una consulta automática al celular del socio o director con botones interactivos para que confirme a qué corresponde el pago con un solo toque desde su Telegram.</li>
+        <li><strong>Inventario Probatorio en Excel:</strong> Todos los comprobantes sincronizados quedan inventariados en la Hoja 3 del reporte Excel para auditorías del SENIAT y SUDEBAN.</li>
+      </ol>
+    </div>
+
+    <h2>CAPÍTULO 6: MATRIZ DE PLAN DE CUENTAS POR BANCO VENEZOLANO</h2>
+    <p>A continuación se detallan las cuentas contables maestras y reglas de asignación por cada institución financiera:</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Banco e Institución</th>
+          <th>Cuenta Banco</th>
+          <th>Proveedores / Pasivo</th>
+          <th>Comisiones Bancarias</th>
+          <th>Cuentas Socios</th>
+          <th>Impuestos y SENIAT</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Banco Mercantil (0105)</strong></td>
+          <td>1.1.1.2.60</td>
+          <td>2.1.1.1.10 (SGLBTR, OSGLBTR)</td>
+          <td>6.1.2.5.02 / 6.1.2.5.03</td>
+          <td>1.1.2.2.30</td>
+          <td>1.2.4.2.30 (Anticipo) / 2.1.2.3.15 (IVA) / 6.1.1.2.19 (Pensiones)</td>
+        </tr>
+        <tr>
+          <td><strong>Bancamiga (0172)</strong></td>
+          <td>1.1.1.2.20</td>
+          <td>2.1.1.1.10 (Masterdebit)</td>
+          <td>6.1.2.5.02 (LBTR, P2C, SMS)</td>
+          <td>1.1.2.2.30</td>
+          <td>6.1.2.1.15 (Teléf) / 6.1.2.1.20 (Luz) / 6.1.2.1.06 (Combust.)</td>
+        </tr>
+        <tr>
+          <td><strong>Banco de Venezuela (0102)</strong></td>
+          <td>1.1.1.2.30 / 1.1.1.2.20</td>
+          <td>2.1.1.1.10 (Domiciliación, OP)</td>
+          <td>6.1.2.5.02 (Banca Móvil, P2P)</td>
+          <td>2.1.1.3.15 / 1.1.2.2.30</td>
+          <td>2.1.2.3.10 (Retenciones ISLR) / 1.1.2.1.10 (CxC Contrapartida)</td>
+        </tr>
+        <tr>
+          <td><strong>Banco Plaza (0138)</strong></td>
+          <td>1.1.1.2.10</td>
+          <td>2.1.1.1.10 (Transf, Prov Plaza)</td>
+          <td>6.1.2.5.02 / 6.1.2.5.03</td>
+          <td>1.1.2.2.30</td>
+          <td>6.1.2.1.64 (Timbres) / 6.1.2.1.25 (Seguros)</td>
+        </tr>
+        <tr>
+          <td><strong>Banco BNC (0191)</strong></td>
+          <td>1.1.1.2.40 / 1.1.1.2.50</td>
+          <td>2.1.1.1.10</td>
+          <td>6.1.2.5.02 (Comisión Créd. Inmdto)</td>
+          <td>1.1.2.2.30</td>
+          <td>99044 ISLR (1.2.4.2.30) / 99019 Pensiones (6.1.1.2.19)</td>
+        </tr>
+        <tr>
+          <td><strong>Banco Banesco (0134)</strong></td>
+          <td>1.1.1.2.10</td>
+          <td>2.1.1.1.10</td>
+          <td>6.1.2.5.02</td>
+          <td>1.1.2.2.30</td>
+          <td>1.1.2.1.10 (Cuentas por cobrar contrapartida NC)</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>CAPÍTULO 7: PROTOCOLO DE CIERRE MENSUAL Y EMISIÓN DE CÉDULA VEN-NIF</h2>
+    <p>Al cierre de cada ejercicio mensual, el departamento contable ejecutará las siguientes validaciones:</p>
+    <ol>
+      <li>Verificar que el saldo conciliado de bancos sea matemáticamente igual al saldo del mayor general contable (Diferencia = Bs. 0,00).</li>
+      <li>Descargar la <strong>Cédula de Cuadre y Portada de Conciliación en Excel (.xlsx)</strong>, la cual contiene la ecuación formal, el estado de prueba de efectivo de 4 columnas y el dictamen de auditoría.</li>
+      <li>Archivar el expediente digital mensual en la <strong>Bóveda Criptográfica SHA-256</strong> para resguardo inalterable.</li>
+      <li>Imprimir y suscribir la presente planilla de aprobación formal.</li>
+    </ol>
+
+    <h2>APROBACIÓN FORMAL Y FIRMAS DE CONFORMIDAD</h2>
+    <p>El presente Manual de Procedimientos y Políticas Contables entra en vigencia a partir de su firma y regirá para todos los cierres bancarios del ejercicio económico:</p>
 
     <table class="signature-table">
       <tr>
@@ -1693,12 +1906,16 @@ export function exportManualToWord(company: UserCompanyProfile): void {
           __________________________________________________<br>
           <strong>GERENCIA DE ADMINISTRACIÓN Y FINANZAS</strong><br>
           Representante Legal / Gerente General<br>
+          Empresa: ${companyName}<br>
+          RIF: ${companyRif}<br>
           Fecha: ${dateFormatted}
         </td>
         <td style="width: 50%;">
           __________________________________________________<br>
           <strong>CONTADOR PÚBLICO COLEGIADO (C.P.C.)</strong><br>
-          Auditor Interno / Contador General<br>
+          Contador General / Auditor Externo<br>
+          Colegio de Contadores Públicos de Venezuela<br>
+          Matrícula C.P.C. N°: _____________________<br>
           Fecha: ${dateFormatted}
         </td>
       </tr>

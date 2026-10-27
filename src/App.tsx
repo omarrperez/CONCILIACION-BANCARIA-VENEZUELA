@@ -31,7 +31,8 @@ import {
   exportToSaint,
   exportToValery,
   triggerFileDownload,
-  exportToReconciliationProofExcel
+  exportToReconciliationProofExcel,
+  exportManualToWord
 } from './services/exportService';
 import { fetchLiveBcvRate, calculateUsdEquivalent } from './services/bcvService';
 import { runVenezuelanAutoMatcher, getLast4Digits } from './services/venezuelanAutoMatcher';
@@ -81,6 +82,7 @@ import { PendingClarificationModule } from './components/PendingClarificationMod
 import { TelegramSyncControl } from './components/TelegramSyncControl';
 import { MonthlyReconciliationVault } from './components/MonthlyReconciliationVault';
 import { BankAccountingRulesModal } from './components/BankAccountingRulesModal';
+import { ErpProceduralManual } from './components/ErpProceduralManual';
 import { DataHealthCheckupModal } from './components/DataHealthCheckupModal';
 import { runDatabaseHealthCheck } from './services/healthCheckService';
 import { EncryptedBackupModal } from './components/EncryptedBackupModal';
@@ -162,6 +164,7 @@ export default function App() {
   const [activePage, setActivePage] = useState<1 | 2>(1); // 1 = Proceso Conciliación Mensual, 2 = Panel Módulos Operativos
   const [mainTab, setMainTab] = useState<'GUIDED' | 'WORKSPACE' | 'DIAGNOSIS' | 'MODULES'>('GUIDED');
   const [showFullWorkspaceOnHome, setShowFullWorkspaceOnHome] = useState(false);
+  const [erpSubTab, setErpSubTab] = useState<'MANUAL' | 'FILES'>('MANUAL');
   
   // Selected transaction passed to Justification Suite
   const [txForJustification, setTxForJustification] = useState<BankTransaction | null>(null);
@@ -1796,7 +1799,7 @@ export default function App() {
             />
           )}
 
-          {/* 10. Exportación a ERP */}
+          {/* 10. Exportación a ERP y Manual de Procedimientos */}
           {activeModule === 'ERP_EXPORT' && (
             <div className="space-y-4">
               {/* Top Navigation Bar: Return to Dashboard */}
@@ -1812,25 +1815,72 @@ export default function App() {
                   </button>
                   <div>
                     <h2 className="text-base font-extrabold text-slate-900">
-                      Centro de Exportación Contable Venezolana (ERP / Excel)
+                      Centro de Exportación Contable y Manual de Procedimientos
                     </h2>
                     <p className="text-xs text-slate-500">
-                      Descarga tus asientos conciliados para SGT, Profit, Gálac, Saint, Valery o Excel oficial.
+                      Manual operativo paso a paso, políticas de control interno y archivos para SGT Contable, Profit, Gálac, Saint y Valery.
                     </p>
                   </div>
                 </div>
 
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => exportManualToWord(company)}
+                    className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer shrink-0"
+                    title="Descargar Manual de Procedimientos oficial en Microsoft Word (.DOC)"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Descargar Manual Word (.DOC)</span>
+                  </button>
+                  <button
+                    onClick={() => setIsExportModalOpen(true)}
+                    className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer shrink-0"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span>Ventana de Exportación</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Selector de Pestañas: Manual de Procedimientos vs Archivos ERP */}
+              <div className="flex items-center gap-2 p-1 bg-slate-100/90 rounded-2xl border border-slate-200/90 w-fit overflow-x-auto max-w-full">
                 <button
-                  onClick={() => setIsExportModalOpen(true)}
-                  className="flex items-center justify-center gap-2 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer shrink-0"
+                  onClick={() => setErpSubTab('MANUAL')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                    erpSubTab === 'MANUAL'
+                      ? 'bg-white text-emerald-900 shadow-xs border border-emerald-200'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
                 >
-                  <Download className="w-4 h-4" />
-                  <span>Abrir Ventana Emergente</span>
+                  <BookOpen className="w-4 h-4 text-emerald-600" />
+                  <span>📖 Manual de Procedimientos y Políticas (Paso a Paso)</span>
+                </button>
+                <button
+                  onClick={() => setErpSubTab('FILES')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                    erpSubTab === 'FILES'
+                      ? 'bg-white text-blue-900 shadow-xs border border-blue-200'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Download className="w-4 h-4 text-blue-600" />
+                  <span>💾 Archivos y Plantillas de Exportación ERP (SGT / Excel)</span>
                 </button>
               </div>
 
-              {/* Direct Cards for instant download right on this page */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* Vista 1: Manual de Procedimientos en Pantalla */}
+              {erpSubTab === 'MANUAL' && (
+                <ErpProceduralManual
+                  company={company}
+                  onOpenExportModal={() => setIsExportModalOpen(true)}
+                  onOpenUploadModal={() => handleOpenUploadFromRoadmap('BANK', 'FILE')}
+                  onOpenBankRulesModal={() => setIsBankRulesModalOpen(true)}
+                />
+              )}
+
+              {/* Vista 2: Archivos y Tarjetas de Exportación */}
+              {erpSubTab === 'FILES' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {/* Excel SGT */}
                 <div className="p-4 bg-white rounded-xl border border-emerald-200 shadow-2xs hover:border-emerald-400 transition-all flex flex-col justify-between">
                   <div>
@@ -1992,6 +2042,7 @@ export default function App() {
                   </div>
                 </div>
               </div>
+            )}
 
               {/* Big Bottom Return Button */}
               <div className="flex justify-center pt-3 pb-6">
