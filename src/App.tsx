@@ -36,7 +36,28 @@ import {
 import { fetchLiveBcvRate, calculateUsdEquivalent } from './services/bcvService';
 import { runVenezuelanAutoMatcher, getLast4Digits } from './services/venezuelanAutoMatcher';
 import { processBankStatementForJustification } from './services/justificationPipeline';
-import { ArrowLeft, Download, FileSpreadsheet, Sparkles, Zap, Bot, RefreshCw, Building2, BookOpen } from 'lucide-react';
+import {
+  ArrowLeft,
+  Download,
+  FileSpreadsheet,
+  Sparkles,
+  Zap,
+  Bot,
+  RefreshCw,
+  Building2,
+  BookOpen,
+  Layers,
+  CheckCircle2,
+  Scale,
+  Grid,
+  ShieldCheck,
+  ArrowRight,
+  Clock,
+  HelpCircle,
+  FolderOpen,
+  Upload
+} from 'lucide-react';
+import { getBankDefinition } from './data/venezuelanBanks';
 
 // Components
 import { Navbar } from './components/Navbar';
@@ -139,6 +160,7 @@ export default function App() {
   const [digitalSupports, setDigitalSupports] = useState<DigitalSupportAttachment[]>([]);
   const [activeModule, setActiveModule] = useState<AppModuleId>('DASHBOARD');
   const [activePage, setActivePage] = useState<1 | 2>(1); // 1 = Proceso Conciliación Mensual, 2 = Panel Módulos Operativos
+  const [mainTab, setMainTab] = useState<'GUIDED' | 'WORKSPACE' | 'DIAGNOSIS' | 'MODULES'>('GUIDED');
   const [showFullWorkspaceOnHome, setShowFullWorkspaceOnHome] = useState(false);
   
   // Selected transaction passed to Justification Suite
@@ -1066,6 +1088,25 @@ export default function App() {
     }
   };
 
+  const getModuleTitle = (mod: AppModuleId): string => {
+    switch (mod) {
+      case 'PENDIENTES_ACLARAR': return 'Movimientos Huérfanos por Aclarar';
+      case 'MONTHLY_RECONCILIATION_VAULT': return 'Bóveda de Conciliaciones Mensuales';
+      case 'RECONCILIATION': return 'Mesa de Trabajo de Conciliación Bancaria';
+      case 'RECONCILIATION_RESULTS': return 'Cédula Oficial de Conciliación Ven-NIF';
+      case 'AI_ASSISTANT': return 'Asistente de Asientos Contables y Ajustes';
+      case 'CASH_TRAIL': return 'Trazabilidad de Efectivo y Blindaje Fiscal';
+      case 'SENIAT_TAX': return 'Módulo Fiscal SENIAT e Impuestos';
+      case 'SUDEBAN_AML': return 'Cumplimiento SUDEBAN y Prevención AML';
+      case 'JUSTIFICATION_MODULES': return 'Justificación de Fondos y Soportes';
+      case 'LEGAL_CONTRACTS': return 'Contratos Legales y Préstamos de Socios';
+      case 'AUDIT_VAULT': return 'Expediente y Bóveda de Auditoría';
+      case 'ERP_EXPORT': return 'Exportación ERP y Sistemas Contables';
+      case 'BANK_RULES': return 'Reglas Contables de Bancos Venezolanos';
+      default: return 'Módulo Operativo';
+    }
+  };
+
   if (!activeUser && !isDemoMode) {
     return (
       <LandingCoverPage
@@ -1112,108 +1153,197 @@ export default function App() {
       {/* Main Container */}
       <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 flex-1">
         
-        {/* Barra de Automatización Bancaria y Telegram en Tiempo Real */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3.5 sm:px-4 rounded-2xl border border-slate-200/90 shadow-2xs">
-          <div className="flex items-center gap-3">
-            <TelegramSyncControl
-              bcvRate={company.bcvRate}
-              transactions={transactions}
-              onUpdateTransactions={setTransactions}
-              onNewSupportsAdded={handleNewSupportsAdded}
-              digitalSupports={digitalSupports}
-              onUpdateDigitalSupports={setDigitalSupports}
-            />
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={() => {
-                const report = runVenezuelanAutoMatcher({
-                  transactions,
-                  availableSupports: digitalSupports
-                });
-                setTransactions(report.updatedTransactions);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs font-bold transition-colors cursor-pointer shadow-2xs"
-              title="Cruzar con soportes digitales, gastos bancarios fijos y memoria de beneficiarios"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Auto-Cruzar con Reglas Venezolanas</span>
-            </button>
-
-            {unclarifiedCount > 0 && (
+        {/* Breadcrumb cuando se explora un módulo individual */}
+        {activeModule !== 'DASHBOARD' && (
+          <div className="flex items-center justify-between gap-3 bg-gradient-to-r from-emerald-50/90 via-teal-50/60 to-sky-50/80 p-3 sm:px-4 rounded-2xl border border-emerald-200/70 shadow-2xs">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
-                onClick={() => setActiveModule('PENDIENTES_ACLARAR')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-extrabold shadow-2xs transition-colors cursor-pointer"
-              >
-                <Zap className="w-3.5 h-3.5" />
-                <span>{unclarifiedCount} Huérfanos por Aclarar</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Paginación Principal de la App: Página 1 (Proceso de Conciliación) vs Página 2 (Panel Operativo) */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 px-4 rounded-2xl border border-slate-200/90 shadow-2xs">
-          <div className="flex items-center gap-2 flex-1 flex-wrap sm:flex-nowrap">
-            <button
-              onClick={() => {
-                setActivePage(1);
-                setActiveModule('DASHBOARD');
-              }}
-              className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                activePage === 1 && activeModule === 'DASHBOARD'
-                  ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-400/60'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold'
-              }`}
-            >
-              <span>📄 Página 1: Proceso de Conciliación Mensual</span>
-            </button>
-
-            <button
-              onClick={() => {
-                setActivePage(2);
-                setActiveModule('DASHBOARD');
-              }}
-              className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                activePage === 2
-                  ? 'bg-slate-900 text-white shadow-xs ring-2 ring-slate-400/60'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold'
-              }`}
-            >
-              <span>🧩 Página 2: Panel de Módulos Operativos</span>
-              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono ${
-                activePage === 2 ? 'bg-slate-800 text-emerald-300' : 'bg-slate-200 text-slate-700'
-              }`}>
-                13 Módulos
-              </span>
-            </button>
-          </div>
-
-          {activeModule !== 'DASHBOARD' && (
-            <div className="flex items-center gap-2 justify-end">
-              <button
-                onClick={() => {
-                  setActiveModule('DASHBOARD');
-                  setActivePage(1);
-                }}
-                className="text-xs font-bold text-emerald-800 hover:text-emerald-950 flex items-center gap-1.5 cursor-pointer bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-300 shadow-2xs transition-colors"
+                onClick={() => setActiveModule('DASHBOARD')}
+                className="text-xs font-bold text-emerald-800 hover:text-emerald-950 flex items-center gap-1.5 cursor-pointer bg-white px-3.5 py-1.5 rounded-xl border border-emerald-200 shadow-2xs hover:bg-emerald-50/50 transition-all"
               >
                 <ArrowLeft className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Volver a Página 1 (Conciliación)</span>
+                <span>Volver al Tablero Principal</span>
               </button>
+              <span className="text-slate-300">/</span>
+              <span className="text-xs font-bold text-slate-800 bg-white/70 px-2.5 py-1 rounded-lg border border-slate-200/80">
+                {getModuleTitle(activeModule)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => {
-                  setActiveModule('DASHBOARD');
-                  setActivePage(2);
-                }}
-                className="text-xs font-bold text-slate-800 hover:text-slate-950 flex items-center gap-1.5 cursor-pointer bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-300 shadow-2xs transition-colors"
+                onClick={() => setIsSettingsModalOpen(true)}
+                className="text-xs font-medium text-slate-600 hover:text-slate-900 bg-white/80 hover:bg-white px-2.5 py-1.5 rounded-xl border border-slate-200 transition-colors cursor-pointer"
               >
-                <span>Volver a Página 2 (Panel Operativo)</span>
+                Ajustes
               </button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {/* Hero Hub Principal de Paz y Claridad (Solo en Dashboard) */}
+        {activeModule === 'DASHBOARD' && (
+          <div className="bg-gradient-to-br from-emerald-50/70 via-teal-50/40 to-sky-50/60 border border-emerald-200/60 rounded-3xl p-5 sm:p-6 shadow-2xs space-y-4">
+            
+            {/* Cabecera Despejada con Saludo y Automatizaciones */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🌿</span>
+                  <h2 className="text-base sm:text-lg font-bold text-slate-800 tracking-tight">
+                    Centro de Conciliación Bancaria y Asientos Contables
+                  </h2>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Procesamiento automatizado con normativa Ven-NIF y SGT Contable para bancos venezolanos.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <TelegramSyncControl
+                  bcvRate={company.bcvRate}
+                  transactions={transactions}
+                  onUpdateTransactions={setTransactions}
+                  onNewSupportsAdded={handleNewSupportsAdded}
+                  digitalSupports={digitalSupports}
+                  onUpdateDigitalSupports={setDigitalSupports}
+                />
+
+                {unclarifiedCount > 0 && (
+                  <button
+                    onClick={() => setActiveModule('PENDIENTES_ACLARAR')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-amber-600" />
+                    <span>{unclarifiedCount} Huérfanos</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* 3 Botones Principales de Inicio Rápido (Estilo Samsung / Apple: Grandes, Tranquilos, 1 Clic) */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+              
+              {/* Tarjeta 1: Cargar Movimientos */}
+              <button
+                onClick={() => handleOpenUploadFromRoadmap('BANK', 'FILE')}
+                className="group p-3.5 rounded-2xl bg-white/90 hover:bg-white border border-emerald-100 hover:border-emerald-300 shadow-2xs hover:shadow-xs transition-all text-left flex items-center gap-3.5 cursor-pointer"
+              >
+                <div className="w-10 h-10 rounded-xl bg-emerald-100/80 group-hover:bg-emerald-200 text-emerald-800 flex items-center justify-center shrink-0 transition-colors">
+                  <Upload className="w-5 h-5 text-emerald-700" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-bold text-slate-800 block truncate group-hover:text-emerald-900">
+                    1. Cargar Estado de Cuenta
+                  </span>
+                  <span className="text-[11px] text-slate-500 block truncate">
+                    Excel, CSV o PDF bancario
+                  </span>
+                </div>
+              </button>
+
+              {/* Tarjeta 2: Cruzar y Auto-Cuadrar */}
+              <button
+                onClick={() => {
+                  const report = runVenezuelanAutoMatcher({
+                    transactions,
+                    availableSupports: digitalSupports
+                  });
+                  setTransactions(report.updatedTransactions);
+                }}
+                className="group p-3.5 rounded-2xl bg-white/90 hover:bg-white border border-teal-100 hover:border-teal-300 shadow-2xs hover:shadow-xs transition-all text-left flex items-center gap-3.5 cursor-pointer"
+              >
+                <div className="w-10 h-10 rounded-xl bg-teal-100/80 group-hover:bg-teal-200 text-teal-800 flex items-center justify-center shrink-0 transition-colors">
+                  <Sparkles className="w-5 h-5 text-teal-700" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-bold text-slate-800 block truncate group-hover:text-teal-900">
+                    2. Cruzar y Auto-Cuadrar
+                  </span>
+                  <span className="text-[11px] text-slate-500 block truncate">
+                    Normas y soportes automáticos
+                  </span>
+                </div>
+              </button>
+
+              {/* Tarjeta 3: Generar Asientos SGT */}
+              <button
+                onClick={() => setIsExportModalOpen(true)}
+                className="group p-3.5 rounded-2xl bg-white/90 hover:bg-white border border-sky-100 hover:border-sky-300 shadow-2xs hover:shadow-xs transition-all text-left flex items-center gap-3.5 cursor-pointer"
+              >
+                <div className="w-10 h-10 rounded-xl bg-sky-100/80 group-hover:bg-sky-200 text-sky-800 flex items-center justify-center shrink-0 transition-colors">
+                  <FileSpreadsheet className="w-5 h-5 text-sky-700" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-xs font-bold text-slate-800 block truncate group-hover:text-sky-900">
+                    3. Asientos SGT y Excel
+                  </span>
+                  <span className="text-[11px] text-slate-500 block truncate">
+                    Partida doble Ven-NIF
+                  </span>
+                </div>
+              </button>
+            </div>
+
+            {/* Selector de Vistas Unificado: 4 Pestañas Claras (Descanso Visual) */}
+            <div className="pt-2 border-t border-emerald-100/80 flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 p-1 bg-white/80 rounded-2xl border border-slate-200/80 shadow-2xs w-full sm:w-auto overflow-x-auto">
+                <button
+                  onClick={() => setMainTab('GUIDED')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                    mainTab === 'GUIDED'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
+                  }`}
+                >
+                  <span>🌟 Proceso Guiado (5 Pasos)</span>
+                </button>
+
+                <button
+                  onClick={() => setMainTab('WORKSPACE')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                    mainTab === 'WORKSPACE'
+                      ? 'bg-teal-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
+                  }`}
+                >
+                  <span>📊 Mesa de Conciliación</span>
+                </button>
+
+                <button
+                  onClick={() => setMainTab('DIAGNOSIS')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                    mainTab === 'DIAGNOSIS'
+                      ? 'bg-sky-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
+                  }`}
+                >
+                  <span>📑 Cédula y Prueba Ven-NIF</span>
+                </button>
+
+                <button
+                  onClick={() => setMainTab('MODULES')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                    mainTab === 'MODULES'
+                      ? 'bg-violet-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
+                  }`}
+                >
+                  <span>🧩 Módulos SGT</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                    mainTab === 'MODULES' ? 'bg-violet-500 text-white' : 'bg-slate-200 text-slate-700'
+                  }`}>
+                    13
+                  </span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 text-[11px] text-slate-500 ml-auto hidden sm:flex">
+                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>Partida Doble Balanceada 0.00 Bs.</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Dynamic Module Content View */}
         <section className="transition-all duration-300">
@@ -1229,9 +1359,8 @@ export default function App() {
               onOpenSettings={() => setIsSettingsModalOpen(true)}
             />
           )}
-          
-          {/* DASHBOARD: PÁGINA 1 (Proceso Guiado de Conciliación) vs PÁGINA 2 (Panel de Módulos Operativos) */}
-          {activeModule === 'DASHBOARD' && activePage === 1 && (
+          {/* TABLERO PRINCIPAL CON VISTAS SEGÚN mainTab */}
+          {activeModule === 'DASHBOARD' && (
             <div className="space-y-6">
               
               {/* Notificación de Sistema Limpio Listo para Cargar */}
@@ -1267,74 +1396,66 @@ export default function App() {
                 </div>
               )}
 
-              {/* WIDGET CRÍTICO: Estado de la Conciliación (3 datos clave: partidas pendientes, total diferencia monetaria y cuadratura de caja) */}
-              <ReconciliationStatusWidget
-                transactions={transactions}
-                currency={currency}
-                proofOfCash={proofOfCash}
-                onNavigateToStep={(step: number) => {
-                  setRoadmapActiveStep(step);
-                  const el = document.getElementById('reconciliation-roadmap-wizard');
-                  if (el) el.scrollIntoView({ behavior: 'smooth' });
-                }}
-                onAutoBalance={handleAutoBalanceFromWidget}
-                onOpenProofModal={() => setIsProofModalOpen(true)}
-                onOpenExportModal={() => setIsExportModalOpen(true)}
-              />
+              {/* PESTAÑA 1: RUTA GUIADA EN 5 PASOS */}
+              {mainTab === 'GUIDED' && (
+                <div className="space-y-6">
+                  {/* WIDGET CRÍTICO: Estado de la Conciliación */}
+                  <ReconciliationStatusWidget
+                    transactions={transactions}
+                    currency={currency}
+                    proofOfCash={proofOfCash}
+                    onNavigateToStep={(step: number) => {
+                      setRoadmapActiveStep(step);
+                      const el = document.getElementById('reconciliation-roadmap-wizard');
+                      if (el) el.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    onAutoBalance={handleAutoBalanceFromWidget}
+                    onOpenProofModal={() => setIsProofModalOpen(true)}
+                    onOpenExportModal={() => setIsExportModalOpen(true)}
+                  />
 
-              {/* PÁGINA 1: Flujo Guiado Paso a Paso (Paso 1, 2, 3, 4, 5 con bordes de colores) */}
-              <div id="reconciliation-roadmap-wizard">
-                <ReconciliationProcessRoadmap
-                  activeStep={roadmapActiveStep}
-                  onSelectStep={(step) => setRoadmapActiveStep(step)}
-                  transactions={transactions}
-                  currency={currency}
-                  bcvRate={company.bcvRate}
-                  company={company}
-                  initialBalanceBank={initialBalanceBank}
-                  initialBalanceLedger={initialBalanceLedger}
-                  proofOfCash={proofOfCash}
-                  onOpenUploadModal={handleOpenUploadFromRoadmap}
-                  onNavigateToWorkspace={() => setActiveModule('RECONCILIATION')}
-                  onNavigateToResults={() => setActiveModule('RECONCILIATION_RESULTS')}
-                  onOpenProofModal={() => setIsProofModalOpen(true)}
-                  onOpenExportModal={() => setIsExportModalOpen(true)}
-                  onOpenAdjustments={() => setActiveModule('AI_ASSISTANT')}
-                  onRunReconciliation={handleRunReconciliationFromRoadmap}
-                  onUpdateInitialBalances={handleUpdateInitialBalances}
-                  onUpdateTransactions={setTransactions}
-                  onOpenRestoreModal={() => setIsRestoreModalOpen(true)}
-                  onOpenTourOverlay={() => setIsTourOverlayOpen(true)}
-                  onOpenClearModal={() => setIsClearModalOpen(true)}
-                  onNavigateToJustification={handleTransferToJustification}
-                />
-              </div>
-
-              {/* Toggle Banner for showing full workspace / cards on Home page */}
-              {!showFullWorkspaceOnHome ? (
-                <div className="p-4 rounded-2xl bg-slate-100/90 border border-slate-200/90 flex flex-col sm:flex-row items-center justify-between gap-3 text-slate-700">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-800">
-                      💡 ¿Deseas explorar la Mesa de Trabajo y Cédula completa en esta misma pantalla?
-                    </span>
+                  {/* PÁGINA 1: Flujo Guiado Paso a Paso (Paso 1, 2, 3, 4, 5 con bordes de colores) */}
+                  <div id="reconciliation-roadmap-wizard">
+                    <ReconciliationProcessRoadmap
+                      activeStep={roadmapActiveStep}
+                      onSelectStep={(step) => setRoadmapActiveStep(step)}
+                      transactions={transactions}
+                      currency={currency}
+                      bcvRate={company.bcvRate}
+                      company={company}
+                      initialBalanceBank={initialBalanceBank}
+                      initialBalanceLedger={initialBalanceLedger}
+                      proofOfCash={proofOfCash}
+                      onOpenUploadModal={handleOpenUploadFromRoadmap}
+                      onNavigateToWorkspace={() => setMainTab('WORKSPACE')}
+                      onNavigateToResults={() => setMainTab('DIAGNOSIS')}
+                      onOpenProofModal={() => setIsProofModalOpen(true)}
+                      onOpenExportModal={() => setIsExportModalOpen(true)}
+                      onOpenAdjustments={() => setActiveModule('AI_ASSISTANT')}
+                      onRunReconciliation={handleRunReconciliationFromRoadmap}
+                      onUpdateInitialBalances={handleUpdateInitialBalances}
+                      onUpdateTransactions={setTransactions}
+                      onOpenRestoreModal={() => setIsRestoreModalOpen(true)}
+                      onOpenTourOverlay={() => setIsTourOverlayOpen(true)}
+                      onOpenClearModal={() => setIsClearModalOpen(true)}
+                      onNavigateToJustification={handleTransferToJustification}
+                    />
                   </div>
-                  <button
-                    onClick={() => setShowFullWorkspaceOnHome(true)}
-                    className="px-4 py-2 rounded-xl bg-white hover:bg-slate-200 text-slate-900 font-extrabold text-xs border border-slate-300 shadow-2xs transition-colors cursor-pointer shrink-0"
-                  >
-                    Mostrar Mesa de Trabajo y Cédula Abajo 👇
-                  </button>
                 </div>
-              ) : (
-                <div className="space-y-6 pt-2">
-                  <div className="flex justify-end">
-                    <button
-                      onClick={() => setShowFullWorkspaceOnHome(false)}
-                      className="px-4 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs transition-colors cursor-pointer"
-                    >
-                      ▲ Ocultar Vista Avanzada (Volver a Modo Enfocado)
-                    </button>
-                  </div>
+              )}
+
+              {/* PESTAÑA 3: CÉDULA Y PRUEBA DE EFECTIVO VEN-NIF */}
+              {mainTab === 'DIAGNOSIS' && (
+                <div className="space-y-6">
+                  <ReconciliationStatusWidget
+                    transactions={transactions}
+                    currency={currency}
+                    proofOfCash={proofOfCash}
+                    onNavigateToStep={() => setMainTab('GUIDED')}
+                    onAutoBalance={handleAutoBalanceFromWidget}
+                    onOpenProofModal={() => setIsProofModalOpen(true)}
+                    onOpenExportModal={() => setIsExportModalOpen(true)}
+                  />
 
                   {/* Split teaser and quick actions */}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -1463,26 +1584,23 @@ export default function App() {
                     </div>
 
                   </div>
+                </div>
+              )}
 
-                  {/* Direct access to reconciliation workspace */}
-                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <h3 className="text-sm font-bold text-slate-900">
-                          Mesa de Trabajo de Conciliación Bancaria Activa
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Visualización simultánea de extractos y asientos contables.
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => setActiveModule('RECONCILIATION')}
-                        className="text-xs font-bold text-emerald-700 hover:underline cursor-pointer"
-                      >
-                        Ver en Pantalla Completa →
-                      </button>
-                    </div>
+              {/* PESTAÑA 2: MESA DE TRABAJO DE CONCILIACIÓN */}
+              {mainTab === 'WORKSPACE' && (
+                <div className="space-y-6">
+                  <ReconciliationStatusWidget
+                    transactions={transactions}
+                    currency={currency}
+                    proofOfCash={proofOfCash}
+                    onNavigateToStep={() => setMainTab('GUIDED')}
+                    onAutoBalance={handleAutoBalanceFromWidget}
+                    onOpenProofModal={() => setIsProofModalOpen(true)}
+                    onOpenExportModal={() => setIsExportModalOpen(true)}
+                  />
 
+                  <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/90 shadow-2xs">
                     <ReconciliationWorkspace
                       transactions={transactions}
                       currency={currency}
@@ -1495,7 +1613,7 @@ export default function App() {
                       onSelectTransactionForModule={handleSelectTransactionForModule}
                       onNavigateToAssistant={handleNavigateToAssistant}
                       onAddParsedTransactions={handleAddParsedTransactions}
-                      onNavigateToResults={() => setActiveModule('RECONCILIATION_RESULTS')}
+                      onNavigateToResults={() => setMainTab('DIAGNOSIS')}
                       onOpenExportModal={() => setIsExportModalOpen(true)}
                       onOpenRestoreModal={() => setIsRestoreModalOpen(true)}
                       onOpenHealthCheckup={() => setIsHealthCheckupModalOpen(true)}
@@ -1508,28 +1626,27 @@ export default function App() {
                 </div>
               )}
 
-            </div>
-          )}
+              {/* PESTAÑA 4: MÓDULOS OPERATIVOS SGT */}
+              {mainTab === 'MODULES' && (
+                <div className="space-y-6">
+                  <DashboardControlPanel
+                    activeModule={activeModule}
+                    onSelectModule={(modId) => {
+                      if (modId === 'DASHBOARD') {
+                        setMainTab('GUIDED');
+                      } else {
+                        setActiveModule(modId);
+                      }
+                    }}
+                    transactions={transactions}
+                    currency={currency}
+                    bcvRate={company.bcvRate}
+                    proofOfCash={proofOfCash}
+                    onOpenProofModal={() => setIsProofModalOpen(true)}
+                  />
+                </div>
+              )}
 
-          {/* PÁGINA 2: Panel de Módulos Operativos (Cuadros Pequeños con Colores Pasteles) */}
-          {activeModule === 'DASHBOARD' && activePage === 2 && (
-            <div className="space-y-6">
-              <DashboardControlPanel
-                activeModule={activeModule}
-                onSelectModule={(modId) => {
-                  if (modId === 'DASHBOARD') {
-                    setActivePage(1);
-                  } else {
-                    setActiveModule(modId);
-                    setActivePage(2);
-                  }
-                }}
-                transactions={transactions}
-                currency={currency}
-                bcvRate={company.bcvRate}
-                proofOfCash={proofOfCash}
-                onOpenProofModal={() => setIsProofModalOpen(true)}
-              />
             </div>
           )}
 

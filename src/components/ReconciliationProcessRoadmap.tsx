@@ -403,7 +403,7 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
       </div>
 
       {/* 5 STEPS PROGRESS TABS BAR */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 bg-slate-100/90 p-2 rounded-2xl border border-slate-200">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 bg-slate-100/80 p-2 rounded-2xl border border-slate-200/80">
         {stepsInfo.map(info => {
           const isSelected = selectedStep === info.step;
           const isCurrentRecommended = computedStep === info.step;
@@ -414,7 +414,7 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
               onClick={() => handleStepChange(info.step)}
               className={`p-3 rounded-xl transition-all text-left flex items-center justify-between cursor-pointer border ${
                 isSelected
-                  ? 'bg-white border-slate-900 text-slate-900 shadow-md ring-2 ring-slate-900/10'
+                  ? 'bg-white border-emerald-400 text-slate-900 shadow-xs ring-2 ring-emerald-400/30'
                   : 'bg-white/60 hover:bg-white border-transparent text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -424,34 +424,34 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
                 }`}>
                   {info.isDone ? <Check className="w-4 h-4 stroke-[3]" /> : info.step}
                 </span>
-                <span className="text-xs font-extrabold truncate">
+                <span className="text-xs font-bold truncate">
                   {info.shortTitle}
                 </span>
               </div>
               {isCurrentRecommended && (
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping shrink-0" title="Paso Recomendado Ahora" />
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping shrink-0" title="Paso Recomendado Ahora" />
               )}
             </button>
           );
         })}
       </div>
 
-      {/* FOCUSED STEP CONTAINER - Minimal, Linear, No labyrinth */}
-      <div className="p-6 rounded-3xl border-2 border-slate-900 bg-gradient-to-br from-white via-slate-50/50 to-white shadow-md space-y-6">
+      {/* FOCUSED STEP CONTAINER - Pastel, Fresco, Ligero */}
+      <div className="p-6 rounded-3xl border border-slate-200/90 bg-white/95 shadow-xs space-y-6">
         
         {/* Step Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/90 pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
           <div className="flex items-center gap-3">
-            <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-black text-base shadow-sm">
+            <span className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center font-black text-base shadow-xs">
               {selectedStep}
             </span>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-black uppercase tracking-wider text-slate-500">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-600">
                   Paso {selectedStep} de 5
                 </span>
                 {computedStep === selectedStep && (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-400 text-slate-950">
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-200">
                     📌 Estás Aquí
                   </span>
                 )}
@@ -462,7 +462,7 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
             </div>
           </div>
 
-          <div className="text-xs font-bold text-slate-600 bg-white px-3.5 py-2 rounded-2xl border border-slate-200">
+          <div className="text-xs font-bold text-slate-600 bg-slate-50 px-3.5 py-2 rounded-2xl border border-slate-200/80">
             {stepsInfo[selectedStep - 1].subtitle}
           </div>
         </div>
@@ -657,31 +657,31 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
               </p>
             </div>
 
-            <div className="p-6 bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white rounded-2xl border border-purple-800 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+            <div className="p-6 bg-gradient-to-r from-purple-50 via-indigo-50/60 to-teal-50 text-slate-800 rounded-2xl border border-purple-200/90 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-5">
               <div className="space-y-1">
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-purple-400 text-slate-950">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-purple-100 text-purple-900 border border-purple-200">
                   Algoritmo Ven-NIF
                 </span>
-                <h4 className="text-base sm:text-lg font-black text-white">
+                <h4 className="text-base sm:text-lg font-black text-slate-900">
                   Motor de Conciliación Automática en 1 Clic
                 </h4>
-                <p className="text-xs text-purple-200 max-w-lg">
+                <p className="text-xs text-slate-600 max-w-lg leading-relaxed">
                   Cruza automáticamente transferencias, depósitos, cobros y pagos entre el estado de cuenta y tu libro contable.
                 </p>
               </div>
 
               <button
                 onClick={onRunReconciliation}
-                className="px-6 py-3.5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs shadow-lg cursor-pointer transition-all flex items-center justify-center gap-2 shrink-0 animate-pulse"
+                className="px-6 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-sm cursor-pointer transition-all flex items-center justify-center gap-2 shrink-0"
               >
-                <Zap className="w-5 h-5 fill-slate-950" />
+                <Zap className="w-4 h-4 text-emerald-200" />
                 <span>⚡ Ejecutar Cruce Automático Ahora</span>
               </button>
             </div>
 
             {/* Resultado del Cruce */}
             <div className="grid grid-cols-2 gap-4">
-              <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950">
+              <div className="p-4 rounded-2xl bg-emerald-50/80 border border-emerald-200 text-emerald-950">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 block">Coincidentes Exactos</span>
                 <div className="text-2xl font-black font-mono text-emerald-900 mt-0.5">
                   {matchedTx.length} partidas
@@ -689,7 +689,7 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
                 <span className="text-xs font-semibold text-emerald-700">Pareadas automáticamente ✓</span>
               </div>
 
-              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950">
+              <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200 text-amber-950">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700 block">Pendientes por Cuadrar</span>
                 <div className="text-2xl font-black font-mono text-amber-900 mt-0.5">
                   {unmatchedTx.length} partidas
@@ -714,10 +714,10 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
             </div>
 
             {/* TARJETA MAESTRA DE AUTO-CUADRE A DIFERENCIA BS. 0,00 */}
-            <div className={`p-6 rounded-2xl border-2 transition-all ${
+            <div className={`p-6 rounded-2xl border transition-all ${
               proofOfCash.isBalanced && unmatchedTx.length === 0
-                ? 'bg-emerald-50 border-emerald-500 shadow-md'
-                : 'bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white border-indigo-700 shadow-lg'
+                ? 'bg-emerald-50/80 border-emerald-300 shadow-sm'
+                : 'bg-gradient-to-r from-amber-50 via-orange-50/30 to-emerald-50/50 text-slate-850 border-amber-200 shadow-sm'
             }`}>
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="space-y-1">
@@ -725,22 +725,22 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
                     <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
                       proofOfCash.isBalanced
                         ? 'bg-emerald-200 text-emerald-950'
-                        : 'bg-amber-400 text-slate-950'
+                        : 'bg-amber-200 text-amber-950 border border-amber-300'
                     }`}>
                       {proofOfCash.isBalanced ? '✓ Cuadrado al 100%' : 'Acción Recomendada'}
                     </span>
-                    <span className="text-xs font-bold text-slate-300">
+                    <span className="text-xs font-bold text-slate-600">
                       Estado: {proofOfCash.isBalanced ? 'Sin diferencias pendientes' : `${unmatchedTx.length} partidas pendientes`}
                     </span>
                   </div>
 
-                  <h4 className="text-lg font-black">
+                  <h4 className="text-lg font-black text-slate-900">
                     {proofOfCash.isBalanced
                       ? '🎉 ¡Conciliación Cuadrada! Diferencia: Bs. 0,00'
                       : 'Resolver Todas las Diferencias Automáticamente'}
                   </h4>
 
-                  <p className={`text-xs ${proofOfCash.isBalanced ? 'text-emerald-800 font-semibold' : 'text-slate-300'}`}>
+                  <p className={`text-xs ${proofOfCash.isBalanced ? 'text-emerald-800 font-semibold' : 'text-slate-600'}`}>
                     {proofOfCash.isBalanced
                       ? 'Todos los movimientos de comisiones, IGTF y débitos ya están registrados en libros y pareados. Puedes avanzar al Paso 5 para descargar el informe en Excel.'
                       : 'Genera de forma automática los asientos contables de comisiones e IGTF faltantes en libros contables para cuadrar la ecuación al 100%.'}
@@ -750,18 +750,18 @@ export const ReconciliationProcessRoadmap: React.FC<ReconciliationProcessRoadmap
                 {proofOfCash.isBalanced ? (
                   <button
                     onClick={handleTransferToJustification}
-                    className="px-6 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs shadow-lg cursor-pointer transition-all flex items-center justify-center gap-2 shrink-0 border border-emerald-400"
+                    className="px-6 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-sm cursor-pointer transition-all flex items-center justify-center gap-2 shrink-0"
                   >
-                    <FolderOpen className="w-5 h-5 text-emerald-400" />
+                    <FolderOpen className="w-5 h-5 text-white" />
                     <span>📁 Pasar a Justificación y Soportes (1 Clic) →</span>
                   </button>
                 ) : (
                   <button
                     onClick={handleAutoBalanceAllDifferences}
-                    className="px-6 py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs shadow-lg cursor-pointer transition-all flex items-center justify-center gap-2 shrink-0 animate-bounce"
+                    className="px-6 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-md cursor-pointer transition-all flex items-center justify-center gap-2 shrink-0"
                   >
-                    <Sparkles className="w-5 h-5 fill-slate-950" />
-                    <span>⚡ Auto-Cuadrar Diferencias y Dejar en 0,00</span>
+                    <Sparkles className="w-4 h-4 text-emerald-200" />
+                    <span>✨ Cuadrar Todo a Bs. 0,00 (1 Clic)</span>
                   </button>
                 )}
               </div>

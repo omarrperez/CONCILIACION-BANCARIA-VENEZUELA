@@ -30,6 +30,8 @@ import {
   classifyTransactionByBankRules,
   generateBankLedgerExcel,
   generateBanescoAsientosExcel,
+  generateBancamigaAsientosExcel,
+  generateStgAccountingJournalExcel,
   BankRulesDefinition,
   BankRuleItem
 } from '../services/bankAccountingRules';
@@ -116,9 +118,16 @@ export const BankAccountingRulesModal: React.FC<BankAccountingRulesModalProps> =
       showToast(`¡Archivo asientos_generados.xlsx descargado con éxito para Banesco con Hoja 1 (NC), Hoja 2 (ND) y Hoja 3 (ND + ND)!`);
     } else if (selectedBankCode === '0102') {
       showToast(`¡Archivo asientos_generados.xlsx descargado con éxito para Banco de Venezuela con Hoja 1 (NC), Hoja 2 (ND) y Hoja 3 (ND + ND)!`);
+    } else if (selectedBankCode === '0172') {
+      showToast(`¡Archivo asientos_generados_bancamiga.xlsx descargado con éxito para Bancamiga (Crisbaorca C.A.)!`);
     } else {
       showToast(`¡Libro de Bancos de ${activeBankDef.bankName} generado con éxito en Excel (3 Hojas con Partida Doble)!`);
     }
+  };
+
+  const handleDownloadStgExcel = () => {
+    generateStgAccountingJournalExcel(transactions, selectedBankCode, company, currency);
+    showToast(`¡Asiento Contable para Sistema STG Contable generado con éxito en Excel (.XLSX)!`);
   };
 
   const handleCopyPrompt = () => {
@@ -217,16 +226,25 @@ export const BankAccountingRulesModal: React.FC<BankAccountingRulesModalProps> =
             )}
 
             <button
+              onClick={handleDownloadStgExcel}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-indigo-700 hover:bg-indigo-600 text-white font-black text-xs shadow-xs transition-all cursor-pointer"
+              title="Generar Asiento Contable estructurado para Sistema STG Contable (Comprobante, Carga Masiva y Resumen Mayor STG)"
+            >
+              <Zap className="w-4 h-4 text-indigo-200" />
+              <span>Exportar Asiento STG (.xlsx)</span>
+            </button>
+
+            <button
               onClick={handleDownloadLedgerExcel}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-white font-black text-xs shadow-xs transition-all cursor-pointer ${
-                selectedBankCode === '0134' || selectedBankCode === '0102'
+                selectedBankCode === '0134' || selectedBankCode === '0102' || selectedBankCode === '0172'
                   ? 'bg-amber-600 hover:bg-amber-500 text-white'
                   : 'bg-emerald-600 hover:bg-emerald-700'
               }`}
-              title={(selectedBankCode === '0134' || selectedBankCode === '0102') ? `Descargar archivo asientos_generados.xlsx (3 Hojas ${activeBankDef.bankName})` : 'Descargar Libro de Bancos en Excel (3 Hojas con Partida Doble)'}
+              title={(selectedBankCode === '0134' || selectedBankCode === '0102' || selectedBankCode === '0172') ? `Descargar archivo asientos_generados.xlsx (3 Hojas ${activeBankDef.bankName})` : 'Descargar Libro de Bancos en Excel (3 Hojas con Partida Doble)'}
             >
               <Download className="w-4 h-4" />
-              <span>{(selectedBankCode === '0134' || selectedBankCode === '0102') ? 'Descargar asientos_generados.xlsx' : 'Descargar Libro en Excel (.XLSX)'}</span>
+              <span>{(selectedBankCode === '0134' || selectedBankCode === '0102' || selectedBankCode === '0172') ? 'Descargar asientos_generados.xlsx' : 'Descargar Libro en Excel (.XLSX)'}</span>
             </button>
             <button
               onClick={onClose}

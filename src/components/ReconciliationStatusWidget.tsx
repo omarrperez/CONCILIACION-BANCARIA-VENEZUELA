@@ -64,27 +64,27 @@ export const ReconciliationStatusWidget: React.FC<ReconciliationStatusWidgetProp
     : 'UNBALANCED';
 
   return (
-    <div className="bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 text-white p-5 sm:p-6 rounded-3xl border border-slate-700/80 shadow-xl relative overflow-hidden">
+    <div className="bg-gradient-to-br from-emerald-50/70 via-teal-50/40 to-sky-50/70 text-slate-800 p-5 sm:p-6 rounded-3xl border border-emerald-200/90 shadow-sm relative overflow-hidden">
       {/* Decorative background glow */}
-      <div className="absolute -top-24 -right-24 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute -bottom-24 -left-24 w-80 h-80 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -top-24 -right-24 w-80 h-80 bg-emerald-400/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-24 -left-24 w-80 h-80 bg-teal-400/10 rounded-full blur-3xl pointer-events-none" />
 
       {/* Header bar: Title & Subtitle */}
-      <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 mb-5 border-b border-slate-700/80">
+      <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 mb-5 border-b border-emerald-200/80">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-lg shadow-emerald-900/40 shrink-0">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/20 shrink-0">
             <Scale className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-base sm:text-lg font-black tracking-tight text-white">
+              <h2 className="text-base sm:text-lg font-black tracking-tight text-slate-900">
                 Estado de la Conciliación
               </h2>
-              <span className="text-[10px] uppercase font-extrabold px-2 py-0.5 rounded-full bg-slate-800 text-emerald-400 border border-emerald-500/30">
+              <span className="text-[10px] uppercase font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-100/90 text-emerald-900 border border-emerald-300/80">
                 Diagnóstico Inmediato
               </span>
             </div>
-            <p className="text-xs text-slate-300 mt-0.5">
+            <p className="text-xs text-slate-600 mt-0.5">
               Los 3 datos más críticos para identificar el estado del cuadre sin entrar a menús
             </p>
           </div>
@@ -92,17 +92,17 @@ export const ReconciliationStatusWidget: React.FC<ReconciliationStatusWidgetProp
 
         {/* Currency & Quick Status Pill */}
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-xl bg-slate-800/90 text-slate-300 border border-slate-700">
+          <span className="text-xs font-mono font-bold px-3 py-1 rounded-xl bg-white/95 text-slate-700 border border-slate-200 shadow-2xs">
             Moneda: {currency}
           </span>
           {isBalanced ? (
-            <span className="flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <span className="flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-xl bg-emerald-100/90 text-emerald-900 border border-emerald-300 shadow-2xs">
+              <ShieldCheck className="w-4 h-4 text-emerald-700" />
               Conciliación Cuadrada
             </span>
           ) : (
-            <span className="flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/40">
-              <AlertCircle className="w-4 h-4 text-amber-400" />
+            <span className="flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-xl bg-amber-100/90 text-amber-900 border border-amber-300 shadow-2xs">
+              <AlertCircle className="w-4 h-4 text-amber-700" />
               Pendiente de Ajustes
             </span>
           )}
@@ -117,40 +117,42 @@ export const ReconciliationStatusWidget: React.FC<ReconciliationStatusWidgetProp
           onClick={() => onNavigateToStep && onNavigateToStep(hasData ? (totalPending > 0 ? 4 : 5) : 1)}
           className={`p-4 rounded-2xl border transition-all cursor-pointer ${
             totalPending === 0 && hasData
-              ? 'bg-slate-800/60 hover:bg-slate-800 border-emerald-500/30 hover:border-emerald-500/60'
+              ? 'bg-white/95 hover:bg-emerald-50/60 border-emerald-300/90 shadow-2xs hover:shadow-sm'
               : totalPending > 0
-              ? 'bg-amber-950/20 hover:bg-amber-950/30 border-amber-500/40 hover:border-amber-500/70'
-              : 'bg-slate-800/40 hover:bg-slate-800/70 border-slate-700'
+              ? 'bg-white/95 hover:bg-amber-50/60 border-amber-300/90 shadow-2xs hover:shadow-sm'
+              : 'bg-white/95 hover:bg-slate-50 border-slate-200/90 shadow-2xs'
           }`}
         >
           <div className="flex items-center justify-between text-xs mb-2">
-            <span className="font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-              <Clock className="w-4 h-4 text-amber-400" />
+            <span className="font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+              <Clock className="w-4 h-4 text-amber-600" />
               1. Partidas Pendientes
             </span>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+              totalPending > 0 ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-slate-100 text-slate-600 border border-slate-200'
+            }`}>
               Por Cruzar
             </span>
           </div>
 
           <div className="flex items-baseline gap-2 my-2">
             <span className={`text-3xl sm:text-4xl font-mono font-black ${
-              totalPending === 0 && hasData ? 'text-emerald-400' : totalPending > 0 ? 'text-amber-400' : 'text-slate-400'
+              totalPending === 0 && hasData ? 'text-emerald-600' : totalPending > 0 ? 'text-amber-600' : 'text-slate-400'
             }`}>
               {totalPending}
             </span>
-            <span className="text-xs font-semibold text-slate-300">
+            <span className="text-xs font-semibold text-slate-600">
               {totalPending === 1 ? 'partida pendiente' : 'partidas pendientes'}
             </span>
           </div>
 
-          <div className="text-[11px] text-slate-300 pt-2 border-t border-slate-700/60 flex items-center justify-between">
+          <div className="text-[11px] text-slate-600 pt-2 border-t border-slate-100 flex items-center justify-between">
             {hasData ? (
-              <span>Banco: <strong>{pendingBank.length}</strong> | Libros: <strong>{pendingLedger.length}</strong></span>
+              <span>Banco: <strong className="text-slate-800">{pendingBank.length}</strong> | Libros: <strong className="text-slate-800">{pendingLedger.length}</strong></span>
             ) : (
               <span>Sin movimientos cargados</span>
             )}
-            <span className="text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1">
+            <span className="text-amber-700 hover:text-amber-800 font-bold flex items-center gap-1">
               {totalPending > 0 ? 'Resolver en Paso 4' : 'Verificadas'}
               <ArrowRight className="w-3 h-3" />
             </span>
@@ -162,19 +164,19 @@ export const ReconciliationStatusWidget: React.FC<ReconciliationStatusWidgetProp
           onClick={() => onNavigateToStep && onNavigateToStep(hasData ? 4 : 1)}
           className={`p-4 rounded-2xl border transition-all cursor-pointer ${
             isZeroDiff && hasData
-              ? 'bg-slate-800/60 hover:bg-slate-800 border-emerald-500/30 hover:border-emerald-500/60'
+              ? 'bg-white/95 hover:bg-emerald-50/60 border-emerald-300/90 shadow-2xs hover:shadow-sm'
               : !isZeroDiff && hasData
-              ? 'bg-rose-950/20 hover:bg-rose-950/30 border-rose-500/40 hover:border-rose-500/70'
-              : 'bg-slate-800/40 hover:bg-slate-800/70 border-slate-700'
+              ? 'bg-white/95 hover:bg-rose-50/60 border-rose-300/90 shadow-2xs hover:shadow-sm'
+              : 'bg-white/95 hover:bg-slate-50 border-slate-200/90 shadow-2xs'
           }`}
         >
           <div className="flex items-center justify-between text-xs mb-2">
-            <span className="font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-              <Scale className="w-4 h-4 text-emerald-400" />
+            <span className="font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+              <Scale className="w-4 h-4 text-emerald-600" />
               2. Total Diferencia Monetaria
             </span>
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-              isZeroDiff && hasData ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
+              isZeroDiff && hasData ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-rose-100 text-rose-800 border border-rose-200'
             }`}>
               {isZeroDiff && hasData ? 'Sin Diferencia' : 'Descuadre Activo'}
             </span>
@@ -182,17 +184,17 @@ export const ReconciliationStatusWidget: React.FC<ReconciliationStatusWidgetProp
 
           <div className="flex items-baseline gap-2 my-2">
             <span className={`text-2xl sm:text-3xl font-mono font-black truncate ${
-              isZeroDiff && hasData ? 'text-emerald-400' : !isZeroDiff && hasData ? 'text-rose-400' : 'text-slate-400'
+              isZeroDiff && hasData ? 'text-emerald-600' : !isZeroDiff && hasData ? 'text-rose-600' : 'text-slate-400'
             }`}>
               {formattedDifference}
             </span>
           </div>
 
-          <div className="text-[11px] text-slate-300 pt-2 border-t border-slate-700/60 flex items-center justify-between">
+          <div className="text-[11px] text-slate-600 pt-2 border-t border-slate-100 flex items-center justify-between">
             {isZeroDiff && hasData ? (
-              <span className="text-emerald-300 font-semibold">✓ Cero diferencia (Cuadre 100%)</span>
+              <span className="text-emerald-700 font-semibold">✓ Cero diferencia (Cuadre 100%)</span>
             ) : hasData ? (
-              <span className="text-rose-300">Variación Banco vs Libros</span>
+              <span className="text-rose-700">Variación Banco vs Libros</span>
             ) : (
               <span>Esperando saldos</span>
             )}
@@ -203,13 +205,13 @@ export const ReconciliationStatusWidget: React.FC<ReconciliationStatusWidgetProp
                   e.stopPropagation();
                   onAutoBalance();
                 }}
-                className="px-2 py-0.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[10px] flex items-center gap-1 transition-colors cursor-pointer shadow-sm"
+                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
               >
                 <Sparkles className="w-3 h-3" />
                 Auto-Cuadrar
               </button>
             ) : (
-              <span className="text-slate-400 flex items-center gap-1 font-semibold">
+              <span className="text-slate-500 hover:text-slate-800 flex items-center gap-1 font-semibold">
                 Paso 4 <ArrowRight className="w-3 h-3" />
               </span>
             )}
@@ -221,18 +223,18 @@ export const ReconciliationStatusWidget: React.FC<ReconciliationStatusWidgetProp
           onClick={() => onNavigateToStep && onNavigateToStep(hasData ? (isBalanced ? 5 : 4) : 1)}
           className={`p-4 rounded-2xl border transition-all cursor-pointer ${
             statusType === 'BALANCED'
-              ? 'bg-emerald-950/30 hover:bg-emerald-950/40 border-emerald-500/50 hover:border-emerald-500/80'
+              ? 'bg-white/95 hover:bg-teal-50/60 border-teal-300/90 shadow-2xs hover:shadow-sm'
               : statusType === 'UNBALANCED'
-              ? 'bg-rose-950/20 hover:bg-rose-950/30 border-rose-500/40 hover:border-rose-500/70'
-              : 'bg-slate-800/40 hover:bg-slate-800/70 border-slate-700'
+              ? 'bg-white/95 hover:bg-rose-50/60 border-rose-300/90 shadow-2xs hover:shadow-sm'
+              : 'bg-white/95 hover:bg-slate-50 border-slate-200/90 shadow-2xs'
           }`}
         >
           <div className="flex items-center justify-between text-xs mb-2">
-            <span className="font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-sky-400" />
+            <span className="font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-teal-600" />
               3. Cuadratura de Caja
             </span>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
               Proof of Cash
             </span>
           </div>
@@ -240,14 +242,14 @@ export const ReconciliationStatusWidget: React.FC<ReconciliationStatusWidgetProp
           <div className="my-2">
             {statusType === 'BALANCED' && (
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/40">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 border border-emerald-200">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
                 </div>
                 <div>
-                  <span className="text-base sm:text-lg font-black text-emerald-300 block leading-tight">
+                  <span className="text-base sm:text-lg font-black text-emerald-900 block leading-tight">
                     CUADRADA ✓
                   </span>
-                  <span className="text-[11px] text-emerald-400/90 font-medium">
+                  <span className="text-[11px] text-emerald-700 font-medium">
                     Ecuación 100% equilibrada
                   </span>
                 </div>
@@ -256,14 +258,14 @@ export const ReconciliationStatusWidget: React.FC<ReconciliationStatusWidgetProp
 
             {statusType === 'UNBALANCED' && (
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0 border border-rose-500/40">
-                  <AlertTriangle className="w-5 h-5 text-rose-400" />
+                <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 border border-rose-200">
+                  <AlertTriangle className="w-5 h-5 text-rose-600" />
                 </div>
                 <div>
-                  <span className="text-base sm:text-lg font-black text-rose-300 block leading-tight">
+                  <span className="text-base sm:text-lg font-black text-rose-900 block leading-tight">
                     DESCUADRADA ⚠️
                   </span>
-                  <span className="text-[11px] text-rose-300/90 font-medium">
+                  <span className="text-[11px] text-rose-700 font-medium">
                     Requiere asiento o ajuste
                   </span>
                 </div>
@@ -272,14 +274,14 @@ export const ReconciliationStatusWidget: React.FC<ReconciliationStatusWidgetProp
 
             {statusType === 'EMPTY' && (
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-slate-800 text-slate-400 flex items-center justify-center shrink-0 border border-slate-700">
+                <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-500 flex items-center justify-center shrink-0 border border-slate-200">
                   <Clock className="w-5 h-5" />
                 </div>
                 <div>
-                  <span className="text-base sm:text-lg font-black text-slate-300 block leading-tight">
+                  <span className="text-base sm:text-lg font-black text-slate-700 block leading-tight">
                     EN ESPERA DE DATOS
                   </span>
-                  <span className="text-[11px] text-slate-400 font-medium">
+                  <span className="text-[11px] text-slate-500 font-medium">
                     Carga extracto y libro
                   </span>
                 </div>
@@ -287,7 +289,7 @@ export const ReconciliationStatusWidget: React.FC<ReconciliationStatusWidgetProp
             )}
           </div>
 
-          <div className="text-[11px] text-slate-300 pt-2 border-t border-slate-700/60 flex items-center justify-between">
+          <div className="text-[11px] text-slate-600 pt-2 border-t border-slate-100 flex items-center justify-between">
             <span>
               {statusType === 'BALANCED'
                 ? 'Norma Ven-NIF cumplida'
@@ -302,13 +304,13 @@ export const ReconciliationStatusWidget: React.FC<ReconciliationStatusWidgetProp
                   e.stopPropagation();
                   onOpenExportModal();
                 }}
-                className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 cursor-pointer"
+                className="text-emerald-700 hover:text-emerald-800 font-bold flex items-center gap-1 cursor-pointer"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5" />
                 Descargar Excel
               </button>
             ) : (
-              <span className="text-sky-400 hover:text-sky-300 font-bold flex items-center gap-1">
+              <span className="text-teal-700 hover:text-teal-800 font-bold flex items-center gap-1">
                 {statusType === 'BALANCED' ? 'Ver Cédula' : 'Corregir'}
                 <ArrowRight className="w-3 h-3" />
               </span>

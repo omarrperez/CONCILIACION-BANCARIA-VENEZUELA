@@ -1747,168 +1747,512 @@ export function classifyTransactionByBankRules(
  *  - Hoja 2: Ingresos y Depósitos (NC) totalizados contra Cuentas por Cobrar (1.1.2.1.10) en negativo (Partida Doble = 0.00)
  *  - Hoja 3: Egresos y Débitos (ND) con Partida Doble (filas positivas de gasto/pasivo y filas negativas de banco = 0.00)
  */
-export function generateBankLedgerExcel(
+/**
+ * GENERADOR EXACTO DE ASIENTOS CONTABLES PARA BANCAMIGA BANCO UNIVERSAL (0172)
+ * Según el manual oficial de Bancamiga (Crisbaorca C.A.): genera asientos_generados_bancamiga.xlsx con:
+ * - Hoja 1 (NC): Notas de crédito y contrapartida Cuentas por Cobrar 1.1.2.1.10
+ * - Hoja 2 (ND): Notas débito clasificadas en positivo (+) y contrapartidas de Banco 1.1.1.2.20 en negativo (-)
+ * - Hoja 3 (ND + ND): Unificación de todas las transacciones de NC y ND con las contrapartidas balanceadas a 0.00
+ * - Columnas: CUENTA CONTABLE | DESCRIPCION | TIPO | REFERENCIA | MONTO
+ */
+export function generateBancamigaAsientosExcel(
+  transactions: BankTransaction[],
+  company?: Partial<UserCompanyProfile>,
+  currency: CurrencyType = 'VES'
+): void {
+  const wb = XLSX.utils.book_new();
+
+  // Filtrar movimientos bancarios de Bancamiga
+  const bamTxs = transactions.filter(t =>
+    t.source === 'BANK' &&
+    t.currency === currency &&
+    (!t.bankCode || t.bankCode === '0172' || t.bankCode === 'ALL' || t.bankName?.toLowerCase().includes('bancamiga'))
+  );
+
+  const headerRow = ['CUENTA CONTABLE', 'DESCRIPCION', 'TIPO', 'REFERENCIA', 'MONTO'];
+  const todayFormatted = formatToVenezuelanDateHyphen(new Date());
+
+  // -------------------------------------------------------------
+  // HOJA 1 (NC) – Notas de Crédito (montos positivos)
+  // Cuenta contable: 1.1.1.2.20 (Bancamiga)
+  // -------------------------------------------------------------
+  const ncList = bamTxs.filter(t => t.txType === 'CREDIT' || t.amountNominal > 0);
+  const sheet1Rows: (string | number)[][] = [headerRow];
+  let totalNC = 0;
+
+  ncList.forEach(tx => {
+    const amtPos = Number(Math.abs(tx.amountNominal).toFixed(2));
+    totalNC += amtPos;
+    sheet1Rows.push([
+      '1.1.1.2.20',
+      tx.rawDescription || 'BANCAMIGA',
+      'NC',
+      tx.referenceNum,
+      amtPos
+    ]);
+  });
+
+  // Contrapartida al final de la Hoja 1:
+  if (ncList.length > 0) {
+    sheet1Rows.push([
+      '1.1.2.1.10',
+      'CUENTAS POR COBRAR',
+      'NC',
+      `RES-${todayFormatted}`,
+      -Number(totalNC.toFixed(2))
+    ]);
+  }
+
+  const wsSheet1 = XLSX.utils.aoa_to_sheet(sheet1Rows);
+  applyNumericFormatToColumnE(wsSheet1);
+  wsSheet1['!cols'] = [
+    { wch: 18 }, { wch: 48 }, { wch: 10 }, { wch: 20 }, { wch: 18 }
+  ];
+
+  // -------------------------------------------------------------
+  // HOJA 2 (ND) – Notas Débito (montos negativos)
+  // -------------------------------------------------------------
+  const ndList = bamTxs.filter(t => t.txType === 'DEBIT' || t.amountNominal < 0);
+  const sheet2Rows: (string | number)[][] = [headerRow];
+
+  // Bloque 1: Cuentas según reglas en positivo (+)
+  ndList.forEach(tx => {
+    const res = classifyTransactionByBankRules(tx.rawDescription, tx.amountNominal, 'DEBIT', '0172');
+    const amtPos = Number(Math.abs(tx.amountNominal).toFixed(2));
+    sheet2Rows.push([
+      res.accountCode,
+      tx.rawDescription,
+      'ND',
+      tx.referenceNum,
+      amtPos
+    ]);
+  });
+
+  // Bloque 2: Contrapartida en negativo (-)
+  ndList.forEach(tx => {
+    const amtNeg = Number((-Math.abs(tx.amountNominal)).toFixed(2));
+    sheet2Rows.push([
+      '1.1.1.2.20',
+      'BANCAMIGA',
+      'ND',
+      tx.referenceNum,
+      amtNeg
+    ]);
+  });
+
+  const wsSheet2 = XLSX.utils.aoa_to_sheet(sheet2Rows);
+  applyNumericFormatToColumnE(wsSheet2);
+  wsSheet2['!cols'] = [
+    { wch: 18 }, { wch: 48 }, { wch: 10 }, { wch: 20 }, { wch: 18 }
+  ];
+
+  // -------------------------------------------------------------
+  // HOJA 3 (ND + ND) – Unificación de NC y ND
+  // -------------------------------------------------------------
+  const sheet3Rows: (string | number)[][] = [headerRow];
+
+  for (let i = 1; i < sheet1Rows.length; i++) sheet3Rows.push(sheet1Rows[i]);
+  for (let i = 1; i < sheet2Rows.length; i++) sheet3Rows.push(sheet2Rows[i]);
+
+  const wsSheet3 = XLSX.utils.aoa_to_sheet(sheet3Rows);
+  applyNumericFormatToColumnE(wsSheet3);
+  wsSheet3['!cols'] = [
+    { wch: 18 }, { wch: 48 }, { wch: 10 }, { wch: 20 }, { wch: 18 }
+  ];
+
+  XLSX.utils.book_append_sheet(wb, wsSheet1, 'Hoja 1 (NC)');
+  XLSX.utils.book_append_sheet(wb, wsSheet2, 'Hoja 2 (ND)');
+  XLSX.utils.book_append_sheet(wb, wsSheet3, 'Hoja 3 (ND + ND)');
+
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'asientos_generados_bancamiga.xlsx';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * GENERADOR OFICIAL DE ASIENTO CONTABLE PARA SISTEMA STG CONTABLE
+ * Genera un Comprobante de Diario STG con formato multi-hoja balanceado:
+ * - Hoja 1: Comprobante Diario STG (COMPROBANTE, FECHA, CUENTA, NOMBRE CUENTA, CONCEPTO, TIPO, REFERENCIA, DEBE, HABER, ESTADO)
+ * - Hoja 2: Carga Masiva STG 5Cols (CUENTA CONTABLE, DESCRIPCION, TIPO, REFERENCIA, MONTO)
+ * - Hoja 3: Resumen Mayor STG (Resumen balanceado por cuenta)
+ */
+export function generateStgAccountingJournalExcel(
   transactions: BankTransaction[],
   bankCode: string = '0102',
   company?: Partial<UserCompanyProfile>,
   currency: CurrencyType = 'VES'
 ): void {
-  // Para Banco de Venezuela (0102), generar según el prompt oficial: asientos_generados.xlsx con las 3 hojas requeridas
-  if (bankCode === '0102') {
-    generateBdvAsientosExcel(transactions, company, currency);
-    return;
-  }
-
-  // Para Banesco (0134), generar según el prompt oficial: asientos_generados.xlsx con las 3 hojas requeridas
-  if (bankCode === '0134') {
-    generateBanescoAsientosExcel(transactions, company, currency);
-    return;
-  }
-
   const bankDef = getBankRulesDefinition(bankCode);
   const wb = XLSX.utils.book_new();
 
-  // Filtrar movimientos bancarios de la moneda y banco correspondiente
   const bankTxList = transactions.filter(t =>
     t.source === 'BANK' &&
     t.currency === currency &&
     (!bankCode || bankCode === 'ALL' || t.bankCode === bankCode)
   );
 
-  const cleanCompanyName = company?.companyName || 'EMPRESA CONTRIBUYENTE C.A.';
-  const cleanRif = (company?.companyRif || 'J-00000000-0').replace(/[^A-Za-z0-9]/g, '');
+  const todayFormatted = formatToVenezuelanDateHyphen(new Date());
+
+  // -------------------------------------------------------------
+  // HOJA 1: Comprobante Diario STG
+  // -------------------------------------------------------------
+  const sheet1Header = [
+    'COMPROBANTE',
+    'FECHA',
+    'CUENTA CONTABLE',
+    'NOMBRE DE CUENTA',
+    'CONCEPTO DE LA OPERACIÓN',
+    'TIPO',
+    'REFERENCIA',
+    'DEBE (Bs)',
+    'HABER (Bs)',
+    'ESTADO'
+  ];
+  const sheet1Rows: (string | number)[][] = [sheet1Header];
+
+  let totalDebe = 0;
+  let totalHaber = 0;
+
+  bankTxList.forEach((tx, idx) => {
+    const res = classifyTransactionByBankRules(tx.rawDescription, tx.amountNominal, tx.txType, tx.bankCode || bankCode);
+    const isCredit = tx.txType === 'CREDIT' || tx.amountNominal > 0;
+    const absAmount = Number(Math.abs(tx.amountNominal).toFixed(2));
+    const compNum = `STG-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(idx + 1).padStart(3, '0')}`;
+    const txDateFormatted = formatToVenezuelanDateHyphen(tx.txDate);
+
+    if (isCredit) {
+      // NC: Debe Banco / Haber Contrapartida (Cuentas por Cobrar)
+      sheet1Rows.push([
+        compNum,
+        txDateFormatted,
+        bankDef.accountCodeBank,
+        bankDef.accountNameBank,
+        tx.rawDescription,
+        'NC',
+        tx.referenceNum,
+        absAmount,
+        0,
+        'BALANCEADO'
+      ]);
+      sheet1Rows.push([
+        compNum,
+        txDateFormatted,
+        res.contraAccountCode || '1.1.2.1.10',
+        res.contraAccountName || 'Cuentas por Cobrar Clientes',
+        `Contrapartida NC: ${tx.rawDescription}`,
+        'NC',
+        tx.referenceNum,
+        0,
+        absAmount,
+        'BALANCEADO'
+      ]);
+      totalDebe += absAmount;
+      totalHaber += absAmount;
+    } else {
+      // ND: Debe Gasto/Pasivo / Haber Banco
+      sheet1Rows.push([
+        compNum,
+        txDateFormatted,
+        res.accountCode,
+        res.accountName,
+        tx.rawDescription,
+        'ND',
+        tx.referenceNum,
+        absAmount,
+        0,
+        'BALANCEADO'
+      ]);
+      sheet1Rows.push([
+        compNum,
+        txDateFormatted,
+        bankDef.accountCodeBank,
+        bankDef.accountNameBank,
+        `Contrapartida ND Banco: ${tx.rawDescription}`,
+        'ND',
+        tx.referenceNum,
+        0,
+        absAmount,
+        'BALANCEADO'
+      ]);
+      totalDebe += absAmount;
+      totalHaber += absAmount;
+    }
+  });
+
+  // Fila de Totales de Comprobante STG
+  sheet1Rows.push([
+    'TOTALES STG',
+    todayFormatted,
+    '---',
+    'ASIENTO CONTABLE STG BALANCEADO',
+    `TOTAL MOVIMIENTOS: ${bankTxList.length}`,
+    'RES',
+    'RESUMEN',
+    Number(totalDebe.toFixed(2)),
+    Number(totalHaber.toFixed(2)),
+    'DIFERENCIA = 0.00'
+  ]);
+
+  const wsSheet1 = XLSX.utils.aoa_to_sheet(sheet1Rows);
+  wsSheet1['!cols'] = [
+    { wch: 18 }, { wch: 12 }, { wch: 18 }, { wch: 32 },
+    { wch: 45 }, { wch: 8 },  { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 15 }
+  ];
+
+  // -------------------------------------------------------------
+  // HOJA 2: Carga Masiva STG 5Cols
+  // -------------------------------------------------------------
+  const sheet2Header = ['CUENTA CONTABLE', 'DESCRIPCION', 'TIPO', 'REFERENCIA', 'MONTO'];
+  const sheet2Rows: (string | number)[][] = [sheet2Header];
+
+  let totalNC = 0;
+  const ncList = bankTxList.filter(t => t.txType === 'CREDIT' || t.amountNominal > 0);
+  ncList.forEach(tx => {
+    const amtPos = Number(Math.abs(tx.amountNominal).toFixed(2));
+    totalNC += amtPos;
+    sheet2Rows.push([
+      bankDef.accountCodeBank,
+      tx.rawDescription,
+      'NC',
+      tx.referenceNum,
+      amtPos
+    ]);
+  });
+  if (ncList.length > 0) {
+    sheet2Rows.push([
+      '1.1.2.1.10',
+      'CUENTAS POR COBRAR (CONTRAPARTIDA NC STG)',
+      'NC',
+      `RES-${todayFormatted}`,
+      -Number(totalNC.toFixed(2))
+    ]);
+  }
+
+  const ndList = bankTxList.filter(t => t.txType === 'DEBIT' || t.amountNominal < 0);
+  ndList.forEach(tx => {
+    const res = classifyTransactionByBankRules(tx.rawDescription, tx.amountNominal, 'DEBIT', bankCode);
+    const amtPos = Number(Math.abs(tx.amountNominal).toFixed(2));
+    sheet2Rows.push([
+      res.accountCode,
+      tx.rawDescription,
+      'ND',
+      tx.referenceNum,
+      amtPos
+    ]);
+  });
+  ndList.forEach(tx => {
+    const amtNeg = Number((-Math.abs(tx.amountNominal)).toFixed(2));
+    sheet2Rows.push([
+      bankDef.accountCodeBank,
+      tx.rawDescription || bankDef.bankName,
+      'ND',
+      tx.referenceNum,
+      amtNeg
+    ]);
+  });
+
+  const wsSheet2 = XLSX.utils.aoa_to_sheet(sheet2Rows);
+  applyNumericFormatToColumnE(wsSheet2);
+  wsSheet2['!cols'] = [{ wch: 18 }, { wch: 48 }, { wch: 10 }, { wch: 20 }, { wch: 18 }];
+
+  // -------------------------------------------------------------
+  // HOJA 3: Resumen Mayor STG
+  // -------------------------------------------------------------
+  const accountTotals: Record<string, { code: string; name: string; debe: number; haber: number }> = {};
+
+  for (let i = 1; i < sheet1Rows.length - 1; i++) {
+    const row = sheet1Rows[i];
+    const code = String(row[2]);
+    const name = String(row[3]);
+    const debe = Number(row[7]) || 0;
+    const haber = Number(row[8]) || 0;
+
+    if (!accountTotals[code]) {
+      accountTotals[code] = { code, name, debe: 0, haber: 0 };
+    }
+    accountTotals[code].debe += debe;
+    accountTotals[code].haber += haber;
+  }
+
+  const sheet3Header = ['CUENTA CONTABLE', 'NOMBRE DE LA CUENTA', 'TOTAL DEBE (Bs)', 'TOTAL HABER (Bs)', 'SALDO NETO (Bs)'];
+  const sheet3Rows: (string | number)[][] = [sheet3Header];
+
+  Object.values(accountTotals).forEach(acc => {
+    const net = Number((acc.debe - acc.haber).toFixed(2));
+    sheet3Rows.push([
+      acc.code,
+      acc.name,
+      Number(acc.debe.toFixed(2)),
+      Number(acc.haber.toFixed(2)),
+      net
+    ]);
+  });
+
+  const wsSheet3 = XLSX.utils.aoa_to_sheet(sheet3Rows);
+  wsSheet3['!cols'] = [{ wch: 18 }, { wch: 38 }, { wch: 18 }, { wch: 18 }, { wch: 18 }];
+
+  XLSX.utils.book_append_sheet(wb, wsSheet1, 'Comprobante Diario STG');
+  XLSX.utils.book_append_sheet(wb, wsSheet2, 'Carga Masiva STG 5Cols');
+  XLSX.utils.book_append_sheet(wb, wsSheet3, 'Resumen Mayor STG');
+
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const bankShort = bankDef.bankName.replace(/[^A-Za-z0-9]/g, '_');
+  a.download = `ASIENTO_STG_CONTABLE_${bankShort}_${todayFormatted.replace(/-/g, '')}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * GENERADOR OFICIAL DEL LIBRO DE BANCOS EN EXCEL (.XLSX)
+ * Implementa las reglas únicas para cada banco venezolano y soporte STG Contable.
+ */
+export function generateBankLedgerExcel(
+  transactions: BankTransaction[],
+  bankCode: string = '0102',
+  company?: Partial<UserCompanyProfile>,
+  currency: CurrencyType = 'VES'
+): void {
+  // Para Banco de Venezuela (0102), generar según el prompt oficial: asientos_generados.xlsx
+  if (bankCode === '0102') {
+    generateBdvAsientosExcel(transactions, company, currency);
+    return;
+  }
+
+  // Para Banesco (0134), generar según el prompt oficial: asientos_generados.xlsx
+  if (bankCode === '0134') {
+    generateBanescoAsientosExcel(transactions, company, currency);
+    return;
+  }
+
+  // Para Bancamiga (0172), generar según el manual oficial de Bancamiga
+  if (bankCode === '0172') {
+    generateBancamigaAsientosExcel(transactions, company, currency);
+    return;
+  }
+
+  // Para STG Contable o modo de exportación STG
+  if (bankCode === 'STG') {
+    generateStgAccountingJournalExcel(transactions, '0102', company, currency);
+    return;
+  }
+
+  const bankDef = getBankRulesDefinition(bankCode);
+  const wb = XLSX.utils.book_new();
+
+  // Filtrar movimientos bancarios
+  const bankTxList = transactions.filter(t =>
+    t.source === 'BANK' &&
+    t.currency === currency &&
+    (!bankCode || bankCode === 'ALL' || t.bankCode === bankCode)
+  );
+
+  const todayFormatted = formatToVenezuelanDateHyphen(new Date());
 
   // ==============================================================
   // HOJA 1: RESUMEN GENERAL / ASIENTOS DE ENTRADA CONTABLE
   // ==============================================================
   const sheet1Rows: (string | number)[][] = [
-    ['Cuenta Contable', 'Descripción', 'Tipo', 'Referencia', 'Monto']
+    ['CUENTA CONTABLE', 'DESCRIPCION', 'TIPO', 'REFERENCIA', 'MONTO']
   ];
 
   bankTxList.forEach(tx => {
     const res = classifyTransactionByBankRules(tx.rawDescription, tx.amountNominal, tx.txType, tx.bankCode || bankCode);
-    const accountCode = res.accountCode;
-    const desc = tx.rawDescription;
-    const tipo = res.classificationType;
-    const ref = tx.referenceNum;
-    const monto = res.signedAmount;
-
-    sheet1Rows.push([accountCode, desc, tipo, ref, formatVenezuelanNumber(monto)]);
+    sheet1Rows.push([res.accountCode, tx.rawDescription, res.classificationType, tx.referenceNum, res.signedAmount]);
   });
 
   const wsSheet1 = XLSX.utils.aoa_to_sheet(sheet1Rows);
-  wsSheet1['!cols'] = [
-    { wch: 18 }, // Cuenta Contable
-    { wch: 45 }, // Descripción
-    { wch: 10 }, // Tipo
-    { wch: 20 }, // Referencia
-    { wch: 18 }  // Monto
-  ];
+  applyNumericFormatToColumnE(wsSheet1);
+  wsSheet1['!cols'] = [{ wch: 18 }, { wch: 45 }, { wch: 10 }, { wch: 20 }, { wch: 18 }];
 
   // ==============================================================
   // HOJA 2: INGRESOS (NC - NOTAS DE CRÉDITO)
-  // Totaliza contra 1.1.2.1.10 (Cuentas por Cobrar) en negativo para cuadre a 0.00
   // ==============================================================
   const sheet2Rows: (string | number)[][] = [
-    ['CUENTA CONTABLE', 'Descripción', 'TIPO', 'Referencia', 'MONTO']
+    ['CUENTA CONTABLE', 'DESCRIPCION', 'TIPO', 'REFERENCIA', 'MONTO']
   ];
 
-  const ncTxList = bankTxList.filter(t => t.txType === 'CREDIT');
+  const ncTxList = bankTxList.filter(t => t.txType === 'CREDIT' || t.amountNominal > 0);
   let totalNC = 0;
 
   ncTxList.forEach(tx => {
     const montoNum = Number(Math.abs(tx.amountNominal).toFixed(2));
     totalNC += montoNum;
-    const isBanesco = bankDef.bankCode === '0134';
-
     sheet2Rows.push([
       bankDef.accountCodeBank,
-      isBanesco ? 'BANESCO' : tx.rawDescription,
+      tx.rawDescription,
       'NC',
       tx.referenceNum,
-      formatVenezuelanNumber(montoNum)
+      montoNum
     ]);
   });
 
-  // Fila totalizadora en negativo (Partida Doble)
   if (ncTxList.length > 0) {
     sheet2Rows.push([
       '1.1.2.1.10',
       'CUENTAS POR COBRAR',
       'NC',
-      ncTxList[0]?.referenceNum || '0',
-      formatVenezuelanNumber(-totalNC)
+      `RES-${todayFormatted}`,
+      -Number(totalNC.toFixed(2))
     ]);
-    sheet2Rows.push(['', 'SALDO NETO PARTIDA DOBLE', '', '', formatVenezuelanNumber(0)]);
   }
 
   const wsSheet2 = XLSX.utils.aoa_to_sheet(sheet2Rows);
-  wsSheet2['!cols'] = [
-    { wch: 18 },
-    { wch: 45 },
-    { wch: 10 },
-    { wch: 20 },
-    { wch: 18 }
-  ];
+  applyNumericFormatToColumnE(wsSheet2);
+  wsSheet2['!cols'] = [{ wch: 18 }, { wch: 45 }, { wch: 10 }, { wch: 20 }, { wch: 18 }];
 
   // ==============================================================
   // HOJA 3: EGRESOS (ND - NOTAS DE DÉBITO)
-  // Primero las filas positivas con su cuenta contable de destino,
-  // luego las filas negativas con la cuenta de banco para cumplir partida doble
   // ==============================================================
   const sheet3Rows: (string | number)[][] = [
-    ['Cuenta Contable', 'descripcion', 'tipo nd/mc', 'referencia', 'Monto (Bs)']
+    ['CUENTA CONTABLE', 'DESCRIPCION', 'TIPO', 'REFERENCIA', 'MONTO']
   ];
 
-  const ndTxList = bankTxList.filter(t => t.txType === 'DEBIT');
+  const ndTxList = bankTxList.filter(t => t.txType === 'DEBIT' || t.amountNominal < 0);
 
-  // Bloque A: Filas positivas con cuenta de gasto/pasivo
   ndTxList.forEach(tx => {
     const res = classifyTransactionByBankRules(tx.rawDescription, tx.amountNominal, 'DEBIT', tx.bankCode || bankCode);
     const montoPositivo = Number(Math.abs(tx.amountNominal).toFixed(2));
-
     sheet3Rows.push([
-      res.accountCode, // ej: 6.1.2.5.02 (Comisiones), 2.1.1.1.10 (Proveedores), etc.
+      res.accountCode,
       tx.rawDescription,
       'ND',
       tx.referenceNum,
-      formatVenezuelanNumber(montoPositivo)
+      montoPositivo
     ]);
   });
 
-  // Bloque B: Mismas filas en negativo con la cuenta de banco (1.1.1.2.10 BANESCO / 1.1.1.2.30 / 1.1.1.2.60)
   ndTxList.forEach(tx => {
     const montoNegativo = Number((-Math.abs(tx.amountNominal)).toFixed(2));
-    const isBanesco = bankDef.bankCode === '0134';
-
     sheet3Rows.push([
       bankDef.accountCodeBank,
-      isBanesco ? 'BANESCO' : tx.rawDescription,
+      tx.rawDescription || bankDef.bankName,
       'ND',
       tx.referenceNum,
-      formatVenezuelanNumber(montoNegativo)
+      montoNegativo
     ]);
   });
 
-  if (ndTxList.length > 0) {
-    sheet3Rows.push(['', 'SALDO NETO PARTIDA DOBLE (SUMA = 0.00)', '', '', formatVenezuelanNumber(0)]);
-  }
-
   const wsSheet3 = XLSX.utils.aoa_to_sheet(sheet3Rows);
-  wsSheet3['!cols'] = [
-    { wch: 18 },
-    { wch: 45 },
-    { wch: 10 },
-    { wch: 20 },
-    { wch: 18 }
-  ];
+  applyNumericFormatToColumnE(wsSheet3);
+  wsSheet3['!cols'] = [{ wch: 18 }, { wch: 45 }, { wch: 10 }, { wch: 20 }, { wch: 18 }];
 
-  // Agregar las 3 hojas reglamentarias al Libro Excel
   XLSX.utils.book_append_sheet(wb, wsSheet1, 'Hoja 1 - Entrada Contable');
   XLSX.utils.book_append_sheet(wb, wsSheet2, 'Hoja 2 - Ingresos NC');
   XLSX.utils.book_append_sheet(wb, wsSheet3, 'Hoja 3 - Egresos ND');
 
-  // Descarga del archivo Excel
   const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
   const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const url = URL.createObjectURL(blob);
@@ -1916,7 +2260,7 @@ export function generateBankLedgerExcel(
   a.href = url;
   const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const bankShortName = bankDef.bankName.replace(/[^A-Za-z0-9]/g, '_');
-  a.download = `LIBRO_DE_BANCOS_${bankShortName}_${cleanRif}_${timestamp}.xlsx`;
+  a.download = `LIBRO_DE_BANCOS_${bankShortName}_${timestamp}.xlsx`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

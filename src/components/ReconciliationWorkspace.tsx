@@ -43,7 +43,7 @@ import { ClearReconciliationModal, ClearReconciliationOption } from './ClearReco
 import { TransactionEditorModal } from './TransactionEditorModal';
 import { BulkAccountAssignmentBar } from './BulkAccountAssignmentBar';
 import { BankAccountingRulesModal } from './BankAccountingRulesModal';
-import { classifyTransactionByBankRules, generateBankLedgerExcel } from '../services/bankAccountingRules';
+import { classifyTransactionByBankRules, generateBankLedgerExcel, generateStgAccountingJournalExcel } from '../services/bankAccountingRules';
 import { exportToReconciliationProofExcel } from '../services/exportService';
 
 interface ReconciliationWorkspaceProps {
@@ -925,6 +925,22 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                       <span>Asientos Banesco (asientos_generados.xlsx)</span>
                     </div>
                     <span className="text-[10px] text-amber-900 font-bold font-mono px-1.5 py-0.5 rounded bg-amber-100">Banesco</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setIsToolsMenuOpen(false);
+                      const targetBank = selectedBank !== 'ALL' ? selectedBank : '0102';
+                      generateStgAccountingJournalExcel(transactions, targetBank, company, currency);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-indigo-50 text-slate-800 font-medium flex items-center justify-between cursor-pointer"
+                    title="Exportar Asiento Contable completo estructurado para el Sistema Contable STG"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Asiento STG Contable (.xlsx)</span>
+                    </div>
+                    <span className="text-[10px] text-indigo-900 font-bold font-mono px-1.5 py-0.5 rounded bg-indigo-100">STG</span>
                   </button>
 
                   <a
